@@ -563,7 +563,7 @@ pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
           <div class="dot dot-y"></div>
           <div class="dot dot-g"></div>
         </div>
-        <pre id="pre{{loop.index}}">{{ ep.response | tojson(indent=2) | hl }}</pre>
+        <pre id="pre{{loop.index}}">{{ ep.json_html }}</pre>
       </div>
     </div>
   </div>
@@ -595,25 +595,31 @@ function copyJson(e, btn, id) {
 
 
 def highlight_json(value):
+    """Convert dict → pretty JSON string dengan syntax highlight HTML."""
     text = _json.dumps(value, indent=2, ensure_ascii=False)
     def rep(m):
         t = m.group(0)
-        if re.match(r'^"[^"]*"(?=\s*:)', t):  return f'<span class="jk">{t}</span>'
-        if re.match(r'^"', t):                  return f'<span class="js">{t}</span>'
-        if re.match(r'^-?\d', t):               return f'<span class="jn">{t}</span>'
-        if t in ('true','false'):               return f'<span class="jb">{t}</span>'
-        if t == 'null':                         return f'<span class="jl">{t}</span>'
-        return t
-    return re.sub(
-        r'"(?:[^"\\]|\\.)*"(?=\s*:)|"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?|true|false|null',
+        safe = t.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
+        if re.match(r'^"[^"]*"(?=\s*:)', t):  return f'<span class="jk">{safe}</span>'
+        if re.match(r'^"', t):                  return f'<span class="js">{safe}</span>'
+        if re.match(r'^-?\d', t):               return f'<span class="jn">{safe}</span>'
+        if t in ('true','false'):               return f'<span class="jb">{safe}</span>'
+        if t == 'null':                         return f'<span class="jl">{safe}</span>'
+        return safe
+    highlighted = re.sub(
+        r'"(?:[^"\\]|\\.)*"(?=\s*:)|"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null',
         rep, text
     )
-
-app.jinja_env.filters['hl'] = lambda v: Markup(highlight_json(v))
+    return Markup(highlighted)
 
 @app.route('/')
 def index():
-    return render_template_string(HTML, endpoints=ENDPOINTS)
+    endpoints_rendered = []
+    for ep in ENDPOINTS:
+        ep2 = dict(ep)
+        ep2['json_html'] = highlight_json(ep['response'])
+        endpoints_rendered.append(ep2)
+    return render_template_string(HTML, endpoints=endpoints_rendered)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
