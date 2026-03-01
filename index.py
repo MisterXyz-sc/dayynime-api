@@ -21,7 +21,7 @@ CACHE_TTL = {
 }
 
 # ── Rate Limiter ──────────────────────────────────────────────
-RATE_LIMIT    = 100   # max request normal
+RATE_LIMIT    = 70    # max request normal
 RATE_WINDOW   = 60    # per 60 detik (1 menit)
 WARN_COUNT    = 3     # jumlah peringatan sebelum ban
 BAN_DURATION  = 300   # ban 5 menit (detik)
@@ -411,6 +411,16 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.75;padding:16px;overflo
 pre::-webkit-scrollbar{height:3px}
 pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
 .jk{color:#7dd3fc}.js{color:#86efac}.jn{color:#fbbf24}.jb{color:#f472b6}.jl{color:#94a3b8}
+.rl-box{background:rgba(220,38,38,0.07);border:1px solid rgba(220,38,38,0.35);border-left:4px solid #ef4444;border-radius:12px;padding:22px 24px;margin-bottom:28px}
+.rl-box-title{font-size:17px;font-weight:900;color:#f87171;margin-bottom:16px;letter-spacing:0.5px}
+.rl-row{display:flex;gap:10px;margin-bottom:10px;font-size:14px;line-height:1.6}
+.rl-key{color:var(--text3);font-family:var(--mono);font-size:12px;white-space:nowrap;padding-top:2px;min-width:110px}
+.rl-val{color:var(--text)}
+.rl-val strong{color:#f87171}
+.rl-divider{height:1px;background:rgba(220,38,38,0.2);margin:14px 0}
+.rl-note{font-size:13px;color:var(--text2);margin-bottom:8px;line-height:1.6}
+.rl-roast{margin-top:14px;padding:10px 16px;background:rgba(220,38,38,0.1);border-radius:8px;font-size:13px;font-weight:700;color:#fca5a5;text-align:center;letter-spacing:0.3px}
+@media(max-width:480px){.rl-row{flex-direction:column;gap:2px}.rl-key{min-width:unset}}
 .footer{text-align:center;padding:32px 20px;border-top:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text3)}
 .footer a{color:var(--accent2);text-decoration:none}
 @media(max-width:480px){.header{padding:36px 16px 32px}.main{padding:24px 14px 60px}.ep-header{padding:14px 16px}.path-box{margin:0 16px;font-size:12px}.ep-body{padding:12px 16px 18px}}
@@ -433,6 +443,17 @@ pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
   </div>
 </div>
 <div class="main">
+  <!-- Rate Limit Warning Box -->
+  <div class="rl-box">
+    <div class="rl-box-title">🚨 PERINGATAN RATE LIMIT</div>
+    <div class="rl-row"><span class="rl-key">Rate Limit:</span><span class="rl-val">70 permintaan per menit</span></div>
+    <div class="rl-row"><span class="rl-key">Pelanggaran:</span><span class="rl-val">Jika Anda melewati batas, Anda akan mendapatkan 3 kali peringatan sebelum <strong>BAN PERMANEN</strong></span></div>
+    <div class="rl-divider"></div>
+    <div class="rl-note">⚡ Gunakan API dengan bijak dan jangan spamming!</div>
+    <div class="rl-note">🛡️ Tujuan Rate Limit: Melindungi server dari serangan Hama DDoS dan aktivitas spammer yang dapat mengganggu layanan untuk pengguna lain.</div>
+    <div class="rl-roast">MINIMAL TAU DIRI.. DI KASI AKSES GRATIS MALAH NGELUNJAK</div>
+  </div>
+
   <div class="section-header">
     <span class="section-icon">📡</span>
     <span class="section-title">Dayynime API Endpoints</span>
