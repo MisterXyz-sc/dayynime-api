@@ -1,6 +1,12 @@
-from flask import Flask, jsonify, request
+"""
+Dayynime API — Real scraper + halaman dokumentasi
+/ → Halaman dokumentasi cantik
+/anime/* → Endpoint scraper beneran
+"""
+from flask import Flask, jsonify, request, render_template_string
 from bs4 import BeautifulSoup
-import cloudscraper, base64, re, time
+from markupsafe import Markup
+import cloudscraper, base64, re, json as _json, time
 
 app = Flask(__name__)
 
@@ -12,6 +18,10 @@ CACHE_TTL = {
     "detail": 600, "episode": 180, "genres": 3600,
     "schedule": 1800,
 }
+
+# ══════════════════════════════════════════════════════
+# SCRAPER CORE
+# ══════════════════════════════════════════════════════
 
 def _scraper():
     s = cloudscraper.create_scraper(
@@ -39,8 +49,7 @@ def _cached(key, ttl_type, fn):
 def _get(path_or_url):
     url = path_or_url if path_or_url.startswith("http") else BASE_URL + path_or_url
     try:
-        s = _scraper()
-        r = s.get(url, timeout=15)
+        r = _scraper().get(url, timeout=15)
         if r.status_code == 200:
             return BeautifulSoup(r.text, "html.parser")
         return None
@@ -68,22 +77,17 @@ def _parse_card(card):
     if img:
         data["poster"] = img.get("src") or img.get("data-src") or img.get("data-lazy-src") or ""
     el = card.select_one(".epx, .eggepisode, .ep, .l2")
-    if el:
-        data["episodes"] = el.get_text(strip=True)
+    if el: data["episodes"] = el.get_text(strip=True)
     el = card.select_one(".typez, .type, .etiket")
-    if el:
-        data["type"] = el.get_text(strip=True)
+    if el: data["type"] = el.get_text(strip=True)
     el = card.select_one(".score, .numscore, .rating")
-    if el:
-        data["score"] = el.get_text(strip=True)
+    if el: data["score"] = el.get_text(strip=True)
     return data
 
 def _parse_pagination(soup):
     pag = {"hasNextPage": False, "hasPrevPage": False, "currentPage": 1}
-    if soup.select_one(".next.page-numbers, a.next, [rel='next']"):
-        pag["hasNextPage"] = True
-    if soup.select_one(".prev.page-numbers, a.prev, [rel='prev']"):
-        pag["hasPrevPage"] = True
+    if soup.select_one(".next.page-numbers, a.next, [rel='next']"): pag["hasNextPage"] = True
+    if soup.select_one(".prev.page-numbers, a.prev, [rel='prev']"): pag["hasPrevPage"] = True
     cur = soup.select_one(".page-numbers.current")
     if cur:
         try: pag["currentPage"] = int(cur.get_text(strip=True))
@@ -91,78 +95,69 @@ def _parse_pagination(soup):
     return pag
 
 def _decode_server(b64_value):
-    if not b64_value:
-        return ""
+    if not b64_value: return ""
     try:
         padded  = b64_value + "=" * (4 - len(b64_value) % 4)
         decoded = base64.b64decode(padded).decode("utf-8", errors="ignore")
         m = re.search(r'src=["\']([^"\']+)["\']', decoded)
-        if m:
-            return m.group(1)
-        if decoded.startswith("http"):
-            return decoded.strip()
+        if m: return m.group(1)
+        if decoded.startswith("http"): return decoded.strip()
         return ""
-    except:
-        return ""
+    except: return ""
 
 def _detect_server_type(url):
-    url_lower = url.lower()
-    if "blogger.com"  in url_lower: return "blogger"
-    if "mega.nz"      in url_lower: return "mega"
-    if "vidhide"      in url_lower: return "vidhide"
-    if "doodstream"   in url_lower: return "doodstream"
-    if "streamtape"   in url_lower: return "streamtape"
-    if "okru"         in url_lower: return "ok.ru"
+    u = url.lower()
+    if "blogger.com" in u:  return "blogger"
+    if "mega.nz"     in u:  return "mega"
+    if "vidhide"     in u:  return "vidhide"
+    if "doodstream"  in u:  return "doodstream"
+    if "streamtape"  in u:  return "streamtape"
     return "embed"
+
+def _do_schedule_raw(soup):
+    schedule = {}
+    days_map = {
+        "sunday":"Minggu","monday":"Senin","tuesday":"Selasa",
+        "wednesday":"Rabu","thursday":"Kamis","friday":"Jumat","saturday":"Sabtu",
+        "minggu":"Minggu","senin":"Senin","selasa":"Selasa",
+        "rabu":"Rabu","kamis":"Kamis","jumat":"Jumat","sabtu":"Sabtu",
+    }
+    for day_el in soup.select(".schedulelist, .schedule .day, .jadwal-hari, .scheduleday"):
+        day_name_el = day_el.select_one("h2, h3, .day-name, strong, .title")
+        if not day_name_el: continue
+        raw      = day_name_el.get_text(strip=True).lower()
+        day_name = days_map.get(raw, raw.title())
+        items    = []
+        for a in day_el.select("li a, .animepost a, .bs a"):
+            items.append({"title": a.get_text(strip=True), "animeId": a["href"].rstrip("/").split("/")[-1], "url": a["href"]})
+        if items: schedule[day_name] = items
+    return schedule
 
 def _do_home():
     soup = _get("/")
-    if not soup:
-        return None
-    ongoing = [_parse_card(c) for c in soup.select(".bs") if _parse_card(c).get("title")]
+    if not soup: return None
+    ongoing = [p for c in soup.select(".bs") if (p := _parse_card(c)) and p.get("title")]
     popular = []
     for c in soup.select(".popular .bs, .trending .bs, .owl-item .bs"):
         p = _parse_card(c)
-        if p.get("title"):
-            popular.append(p)
-    schedule = _do_schedule_raw(soup)
-    return {"ongoing": ongoing, "popular": popular, "schedule": schedule}
+        if p.get("title"): popular.append(p)
+    return {"ongoing": ongoing, "popular": popular, "schedule": _do_schedule_raw(soup)}
 
 def _do_list(status, page):
-    if status == "movie":
-        url = f"/anime/?type=movie&page={page}"
-    elif status == "popular":
-        url = f"/anime/?order=popular&page={page}"
-    else:
-        url = f"/anime/?status={status}&page={page}"
-    soup = _get(url)
-    if not soup:
-        return None
-    return {
-        "animeList":  [_parse_card(c) for c in soup.select(".bs")],
-        "pagination": _parse_pagination(soup),
-    }
+    url_map = {"movie": f"/anime/?type=movie&page={page}", "popular": f"/anime/?order=popular&page={page}"}
+    soup = _get(url_map.get(status, f"/anime/?status={status}&page={page}"))
+    if not soup: return None
+    return {"animeList": [_parse_card(c) for c in soup.select(".bs")], "pagination": _parse_pagination(soup)}
 
 def _do_search(query, page):
-    url = f"/page/{page}/?s={query}" if page > 1 else f"/?s={query}"
-    soup = _get(url)
-    if not soup:
-        return None
-    return {
-        "animeList":  [_parse_card(c) for c in soup.select(".bs")],
-        "pagination": _parse_pagination(soup),
-        "query":      query,
-    }
+    soup = _get(f"/page/{page}/?s={query}" if page > 1 else f"/?s={query}")
+    if not soup: return None
+    return {"animeList": [_parse_card(c) for c in soup.select(".bs")], "pagination": _parse_pagination(soup), "query": query}
 
 def _do_detail(slug):
     soup = _get(f"/anime/{slug}/")
-    if not soup:
-        return None
-    data = {
-        "animeId": slug, "title": "", "poster": "", "synopsis": "",
-        "status": "", "type": "", "score": "", "studio": "",
-        "released": "", "genres": [], "info": {}, "episodeList": [],
-    }
+    if not soup: return None
+    data = {"animeId": slug, "title": "", "poster": "", "synopsis": "", "status": "", "type": "", "score": "", "studio": "", "released": "", "genres": [], "info": {}, "episodeList": []}
     el = soup.select_one(".entry-title, h1.title, h1")
     if el: data["title"] = el.get_text(strip=True)
     el = soup.select_one(".thumb img, .poster img, .wp-post-image")
@@ -173,44 +168,30 @@ def _do_detail(slug):
         text = row.get_text(" ", strip=True)
         if ":" in text:
             k, _, v = text.partition(":")
-            key = k.strip().lower()
-            val = v.strip()
+            key, val = k.strip().lower(), v.strip()
             data["info"][key] = val
-            if "status"  in key: data["status"]   = val
-            if "tipe"    in key or "type" in key: data["type"] = val
-            if "skor"    in key or "score" in key: data["score"] = val
-            if "studio"  in key: data["studio"]   = val
-            if "tayang"  in key or "rilis" in key: data["released"] = val
+            if "status" in key: data["status"] = val
+            if "tipe" in key or "type" in key: data["type"] = val
+            if "skor" in key or "score" in key: data["score"] = val
+            if "studio" in key: data["studio"] = val
+            if "tayang" in key or "rilis" in key: data["released"] = val
     for a in soup.select(".genre-info a, .genxed a, .spe a[href*='genre']"):
-        name   = a.get_text(strip=True)
+        name = a.get_text(strip=True)
         slug_g = a["href"].rstrip("/").split("/")[-1]
-        if name and slug_g:
-            data["genres"].append({"name": name, "genreId": slug_g})
+        if name and slug_g: data["genres"].append({"name": name, "genreId": slug_g})
     ep_links = soup.select("#daftarepisode li a") or soup.select("ul li a[href*='episode']")
     for a in ep_links:
-        ep_url  = a.get("href", "")
-        ep_slug = ep_url.rstrip("/").split("/")[-1]
-        m       = re.search(r"episode[- ](\d+(?:\.\d+)?)", ep_slug, re.I)
-        ep_num  = m.group(1) if m else ""
-        li      = a.find_parent("li")
+        ep_slug = a.get("href", "").rstrip("/").split("/")[-1]
+        m = re.search(r"episode[- ](\d+(?:\.\d+)?)", ep_slug, re.I)
+        li = a.find_parent("li")
         ep_date = li.select_one(".date, .epl-date") if li else None
-        data["episodeList"].append({
-            "episodeId": ep_slug,
-            "title":     a.get_text(strip=True),
-            "num":       ep_num,
-            "date":      ep_date.get_text(strip=True) if ep_date else "",
-        })
+        data["episodeList"].append({"episodeId": ep_slug, "title": a.get_text(strip=True), "num": m.group(1) if m else "", "date": ep_date.get_text(strip=True) if ep_date else ""})
     return data
 
 def _do_episode(episode_slug):
     soup = _get(f"/{episode_slug}/")
-    if not soup:
-        return None
-    data = {
-        "episodeId": episode_slug, "title": "", "animeId": "",
-        "episodeNum": "", "prevEpisode": None, "nextEpisode": None,
-        "defaultEmbed": "", "servers": [],
-    }
+    if not soup: return None
+    data = {"episodeId": episode_slug, "title": "", "animeId": "", "episodeNum": "", "prevEpisode": None, "nextEpisode": None, "defaultEmbed": "", "servers": []}
     el = soup.select_one(".entry-title, h1")
     if el: data["title"] = el.get_text(strip=True)
     m = re.match(r"nonton-(.+?)-episode-\d", episode_slug)
@@ -221,56 +202,188 @@ def _do_episode(episode_slug):
         href = a.get("href", "")
         text = a.get_text(strip=True).lower()
         slug_nav = href.rstrip("/").split("/")[-1]
-        if any(w in text for w in ["sebelum", "prev", "◄", "←", "«"]):
-            data["prevEpisode"] = slug_nav
-        elif any(w in text for w in ["selanjut", "next", "►", "→", "»"]):
-            data["nextEpisode"] = slug_nav
+        if any(w in text for w in ["sebelum", "prev", "◄", "←", "«"]): data["prevEpisode"] = slug_nav
+        elif any(w in text for w in ["selanjut", "next", "►", "→", "»"]): data["nextEpisode"] = slug_nav
     iframe = soup.select_one("#pembed iframe, #embed_holder iframe")
-    if iframe:
-        data["defaultEmbed"] = iframe.get("src", "")
+    if iframe: data["defaultEmbed"] = iframe.get("src", "")
     servers = []
     for opt in soup.select("select option"):
-        val   = opt.get("value", "").strip()
+        val = opt.get("value", "").strip()
         label = opt.get_text(strip=True)
-        if not val or not label or label == "Pilih Server/Kualitas":
-            continue
+        if not val or not label or label == "Pilih Server/Kualitas": continue
         embed_url = _decode_server(val)
-        if not embed_url:
-            continue
-        servers.append({"name": label, "embedUrl": embed_url, "type": _detect_server_type(embed_url)})
+        if embed_url: servers.append({"name": label, "embedUrl": embed_url, "type": _detect_server_type(embed_url)})
     if not servers:
         for btn in soup.select(".server a, .mirrorlist a, .btn-eps a"):
             embed_url = btn.get("href") or btn.get("data-src") or btn.get("data-video", "")
-            if embed_url:
-                servers.append({"name": btn.get_text(strip=True), "embedUrl": embed_url, "type": _detect_server_type(embed_url)})
+            if embed_url: servers.append({"name": btn.get_text(strip=True), "embedUrl": embed_url, "type": _detect_server_type(embed_url)})
     data["servers"] = servers
     return data
 
-def _do_schedule_raw(soup):
-    schedule = {}
-    days_map = {
-        "sunday": "Minggu", "monday": "Senin", "tuesday": "Selasa",
-        "wednesday": "Rabu", "thursday": "Kamis", "friday": "Jumat",
-        "saturday": "Sabtu", "minggu": "Minggu", "senin": "Senin",
-        "selasa": "Selasa", "rabu": "Rabu", "kamis": "Kamis",
-        "jumat": "Jumat", "sabtu": "Sabtu",
-    }
-    for day_el in soup.select(".schedulelist, .schedule .day, .jadwal-hari, .scheduleday"):
-        day_name_el = day_el.select_one("h2, h3, .day-name, strong, .title")
-        if not day_name_el:
-            continue
-        raw = day_name_el.get_text(strip=True).lower()
-        day_name = days_map.get(raw, raw.title())
-        items = []
-        for a in day_el.select("li a, .animepost a, .bs a"):
-            items.append({
-                "title":   a.get_text(strip=True),
-                "animeId": a["href"].rstrip("/").split("/")[-1],
-                "url":     a["href"],
-            })
-        if items:
-            schedule[day_name] = items
-    return schedule
+# ══════════════════════════════════════════════════════
+# DOCS UI
+# ══════════════════════════════════════════════════════
+
+ENDPOINTS_DOCS = [
+    {"title": "Halaman Home", "path": "/anime/home", "description": "Mengambil data homepage — daftar anime ongoing terbaru dan anime populer.", "response": {"status": "success", "data": {"ongoing": [{"animeId": "one-piece", "title": "One Piece", "poster": "https://...", "episodes": "Episode 1122", "type": "TV", "score": "9.1"}], "popular": [], "schedule": {}}}},
+    {"title": "Anime Ongoing", "path": "/anime/ongoing?page=1", "description": "Daftar anime yang sedang tayang.", "response": {"status": "success", "data": {"animeList": [{"animeId": "slug", "title": "Judul Anime", "poster": "https://...", "episodes": "Episode 7", "type": "TV", "score": "7.5"}], "pagination": {"hasNextPage": True, "hasPrevPage": False, "currentPage": 1}}}},
+    {"title": "Anime Completed", "path": "/anime/completed?page=1", "description": "Daftar anime yang sudah selesai tayang.", "response": {"status": "success", "data": {"animeList": [], "pagination": {"hasNextPage": True, "hasPrevPage": False, "currentPage": 1}}}},
+    {"title": "Anime Movie", "path": "/anime/movies?page=1", "description": "Daftar anime dengan tipe Movie.", "response": {"status": "success", "data": {"animeList": [], "pagination": {"hasNextPage": True, "hasPrevPage": False, "currentPage": 1}}}},
+    {"title": "Anime Populer", "path": "/anime/popular?page=1", "description": "Daftar anime terpopuler.", "response": {"status": "success", "data": {"animeList": [], "pagination": {"hasNextPage": True, "hasPrevPage": False, "currentPage": 1}}}},
+    {"title": "Cari Anime", "path": "/anime/search?q={query}", "description": "Cari anime berdasarkan judul.", "example": "Contoh: /anime/search?q=naruto", "response": {"status": "success", "data": {"query": "naruto", "animeList": [], "pagination": {}}}},
+    {"title": "Detail Lengkap Anime", "path": "/anime/detail/{slug}", "description": "Detail lengkap sebuah anime beserta daftar episode.", "example": "Contoh: /anime/detail/naruto", "response": {"status": "success", "data": {"animeId": "naruto", "title": "Naruto", "poster": "https://...", "synopsis": "...", "status": "Completed", "type": "TV", "score": "8.3", "genres": [], "episodeList": []}}},
+    {"title": "Detail Episode + Server", "path": "/anime/episode/{slug}", "description": "Detail episode beserta daftar server streaming.", "example": "Contoh: /anime/episode/nonton-naruto-episode-1", "response": {"status": "success", "data": {"episodeId": "nonton-naruto-episode-1", "title": "Nonton Naruto Episode 1", "animeId": "naruto", "episodeNum": "1", "prevEpisode": None, "nextEpisode": "nonton-naruto-episode-2", "defaultEmbed": "https://...", "servers": [{"name": "720p", "embedUrl": "https://...", "type": "vidhide"}]}}},
+    {"title": "Daftar Genre", "path": "/anime/genres", "description": "Semua genre anime yang tersedia.", "response": {"status": "success", "data": {"genreList": [{"name": "Action", "genreId": "action"}, {"name": "Comedy", "genreId": "comedy"}]}}},
+    {"title": "Jadwal Rilis", "path": "/anime/schedule", "description": "Jadwal rilis anime per hari.", "response": {"status": "success", "data": {"days": [{"day": "Senin", "animeList": []}, {"day": "Selasa", "animeList": []}]}}},
+]
+
+def highlight_json(value):
+    text = _json.dumps(value, indent=2, ensure_ascii=False)
+    def rep(m):
+        t = m.group(0)
+        safe = t.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
+        if re.match(r'^"[^"]*"(?=\s*:)', t): return f'<span class="jk">{safe}</span>'
+        if re.match(r'^"', t):               return f'<span class="js">{safe}</span>'
+        if re.match(r'^-?\d', t):            return f'<span class="jn">{safe}</span>'
+        if t in ('true','false'):            return f'<span class="jb">{safe}</span>'
+        if t == 'null':                      return f'<span class="jl">{safe}</span>'
+        return safe
+    return re.sub(r'"(?:[^"\\]|\\.)*"(?=\s*:)|"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null', rep, text)
+
+HTML = '''<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dayynime API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1923;--bg2:#152030;--bg3:#1a2840;--card:#162035;--card2:#1e2d45;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
+  --accent:#e8501a;--accent2:#ff6b35;--blue:#38bdf8;--green:#4ade80;
+  --text:#e2eaf4;--text2:#8ba0b8;--text3:#4d6278;
+  --sans:'Plus Jakarta Sans',sans-serif;--mono:'Fira Code',monospace;
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;line-height:1.6}
+.header{background:linear-gradient(180deg,var(--bg2) 0%,var(--bg) 100%);border-bottom:1px solid var(--border);padding:48px 24px 40px;text-align:center;position:relative;overflow:hidden}
+.header::before{content:'';position:absolute;top:-60px;left:50%;transform:translateX(-50%);width:600px;height:300px;background:radial-gradient(ellipse,rgba(232,80,26,0.12) 0%,transparent 70%);pointer-events:none}
+.header-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(232,80,26,0.12);border:1px solid rgba(232,80,26,0.25);border-radius:99px;padding:4px 14px;font-family:var(--mono);font-size:11px;color:var(--accent2);margin-bottom:20px;letter-spacing:0.5px}
+.badge-dot{width:6px;height:6px;border-radius:50%;background:var(--accent2);animation:blink 1.5s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+.header-logo{font-size:clamp(28px,6vw,44px);font-weight:800;letter-spacing:-1px;margin-bottom:10px}
+.header-logo .d{color:var(--accent)}
+.header-logo .api{font-family:var(--mono);font-size:0.55em;font-weight:500;color:var(--text2);vertical-align:middle;margin-left:4px;background:var(--bg3);border:1px solid var(--border2);padding:2px 10px;border-radius:6px;letter-spacing:2px}
+.header-desc{color:var(--text2);font-size:15px;max-width:480px;margin:0 auto 28px}
+.base-url{display:inline-flex;align-items:center;gap:12px;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:10px 20px;font-family:var(--mono);font-size:13px}
+.base-url-label{color:var(--text3);font-size:10px;letter-spacing:2px;text-transform:uppercase}
+.base-url-val{color:var(--blue)}
+.header-stats{display:flex;justify-content:center;gap:32px;margin-top:24px;flex-wrap:wrap}
+.stat{font-size:13px;color:var(--text3)}
+.stat strong{color:var(--text);font-weight:700;margin-right:4px}
+.main{max-width:780px;margin:0 auto;padding:32px 20px 80px}
+.section-header{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.section-icon{font-size:22px}
+.section-title{font-size:20px;font-weight:800;color:var(--text)}
+.section-line{flex:1;height:2px;background:linear-gradient(to right,var(--accent),transparent)}
+.ep-card{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;margin-bottom:14px;overflow:hidden;transition:border-color 0.2s,box-shadow 0.2s}
+.ep-card:hover{border-color:rgba(232,80,26,0.4);box-shadow:0 4px 24px rgba(0,0,0,0.3)}
+.ep-header{display:flex;align-items:center;gap:12px;padding:16px 20px;cursor:pointer;user-select:none}
+.ep-header:hover{background:rgba(255,255,255,0.02)}
+.method-pill{font-family:var(--mono);font-size:10px;font-weight:600;padding:3px 10px;border-radius:6px;flex-shrink:0;letter-spacing:1px;background:rgba(74,222,128,0.1);color:var(--green);border:1px solid rgba(74,222,128,0.2)}
+.ep-title{font-size:15px;font-weight:700;color:var(--text);flex:1}
+.chevron{width:18px;height:18px;color:var(--text3);transition:transform 0.25s cubic-bezier(.34,1.56,.64,1);flex-shrink:0}
+.ep-card.open .chevron{transform:rotate(180deg)}
+.path-box{margin:0 20px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:11px 16px;font-family:var(--mono);font-size:13px;color:var(--text2);display:flex;align-items:center;gap:10px}
+.path-method{color:var(--green);font-weight:600;margin-right:2px}
+.path-static{color:var(--text2)}
+.path-param{color:var(--accent2)}
+.ep-body{display:none;padding:14px 20px 20px}
+.ep-card.open .ep-body{display:block}
+.ep-desc{font-size:13px;color:var(--text2);margin-bottom:6px;line-height:1.65}
+.ep-example{font-size:12px;color:var(--text3);font-family:var(--mono);margin-bottom:16px}
+.ep-example span{color:var(--accent2)}
+.json-label-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.json-label-text{font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text3)}
+.copy-btn{font-family:var(--mono);font-size:10px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:4px 12px;cursor:pointer;transition:all 0.15s}
+.copy-btn:hover{background:var(--card2);color:var(--text)}
+.copy-btn.ok{color:var(--green);border-color:rgba(74,222,128,0.3)}
+.json-wrap{background:var(--bg);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.json-bar{background:var(--bg3);border-bottom:1px solid var(--border);padding:8px 14px;display:flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:50%}
+.dot-r{background:#ff5f57}.dot-y{background:#febc2e}.dot-g{background:#28c840}
+pre{font-family:var(--mono);font-size:12px;line-height:1.75;padding:16px;overflow-x:auto;color:var(--text)}
+pre::-webkit-scrollbar{height:3px}
+pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
+.jk{color:#7dd3fc}.js{color:#86efac}.jn{color:#fbbf24}.jb{color:#f472b6}.jl{color:#94a3b8}
+.footer{text-align:center;padding:32px 20px;border-top:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text3)}
+.footer a{color:var(--accent2);text-decoration:none}
+@media(max-width:480px){.header{padding:36px 16px 32px}.main{padding:24px 14px 60px}.ep-header{padding:14px 16px}.path-box{margin:0 16px;font-size:12px}.ep-body{padding:12px 16px 18px}}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-badge"><span class="badge-dot"></span>API ONLINE</div>
+  <div class="header-logo"><span class="d">D</span>AYYNIME<span class="api">API</span></div>
+  <p class="header-desc">REST API scraper untuk streaming anime sub Indo. Data diambil langsung dari sumber dengan sistem cache.</p>
+  <div class="base-url">
+    <span class="base-url-label">Base URL</span>
+    <span class="base-url-val">https://dayynime-api.vercel.app</span>
+  </div>
+  <div class="header-stats">
+    <div class="stat"><strong>{{ endpoints|length }}</strong>Endpoints</div>
+    <div class="stat"><strong>v1.animasu.app</strong>Sumber</div>
+    <div class="stat"><strong>Flask</strong>Framework</div>
+    <div class="stat"><strong>JSON</strong>Format</div>
+  </div>
+</div>
+<div class="main">
+  <div class="section-header">
+    <span class="section-icon">📡</span>
+    <span class="section-title">Dayynime API Endpoints</span>
+    <div class="section-line"></div>
+  </div>
+  {% for ep in endpoints %}
+  <div class="ep-card" id="ep{{loop.index}}">
+    <div class="ep-header" onclick="toggle(this)">
+      <span class="method-pill">GET</span>
+      <span class="ep-title">{{ ep.title }}</span>
+      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="path-box">
+      <span class="path-method">GET</span>
+      {% set parts = ep.path.split('{') %}
+      {% if parts|length > 1 %}
+        <span class="path-static">{{ parts[0] }}</span><span class="path-param">{{'{{'}}{{ parts[1] }}</span>
+      {% else %}
+        <span class="path-static">{{ ep.path }}</span>
+      {% endif %}
+    </div>
+    <div class="ep-body">
+      <p class="ep-desc">{{ ep.description }}</p>
+      {% if ep.example is defined %}<p class="ep-example">📌 <span>{{ ep.example }}</span></p>{% endif %}
+      <div class="json-label-row">
+        <span class="json-label-text">Response JSON</span>
+        <button class="copy-btn" onclick="copyJson(event,this,'pre{{loop.index}}')">Copy</button>
+      </div>
+      <div class="json-wrap">
+        <div class="json-bar"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div></div>
+        <pre id="pre{{loop.index}}">{{ ep.json_html }}</pre>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<div class="footer">Dayynime API v1.0.0 &nbsp;·&nbsp; Source: <a href="https://v1.animasu.app" target="_blank">v1.animasu.app</a> &nbsp;·&nbsp; Built with Flask + cloudscraper</div>
+<script>
+function toggle(header){if(event.target.closest('.copy-btn'))return;header.closest('.ep-card').classList.toggle('open')}
+function copyJson(e,btn,id){e.stopPropagation();const text=document.getElementById(id).innerText;navigator.clipboard.writeText(text).then(()=>{btn.textContent='✓ Copied';btn.classList.add('ok');setTimeout(()=>{btn.textContent='Copy';btn.classList.remove('ok')},2000)})}
+</script>
+</body>
+</html>'''
 
 # ══════════════════════════════════════════════════════
 # ROUTES
@@ -278,16 +391,12 @@ def _do_schedule_raw(soup):
 
 @app.route("/")
 def index():
-    return jsonify({
-        "name": "Dayynime API", "version": "1.0.0", "status": "online",
-        "endpoints": [
-            "GET /anime/home", "GET /anime/ongoing?page=1",
-            "GET /anime/completed?page=1", "GET /anime/movies?page=1",
-            "GET /anime/popular?page=1", "GET /anime/search?q={query}",
-            "GET /anime/detail/{slug}", "GET /anime/episode/{slug}",
-            "GET /anime/genres", "GET /anime/schedule",
-        ]
-    })
+    endpoints_rendered = []
+    for ep in ENDPOINTS_DOCS:
+        ep2 = dict(ep)
+        ep2["json_html"] = Markup(highlight_json(ep["response"]))
+        endpoints_rendered.append(ep2)
+    return render_template_string(HTML, endpoints=endpoints_rendered)
 
 @app.route("/anime/home")
 def route_home():
@@ -322,8 +431,7 @@ def route_popular():
 def route_search():
     query = request.args.get("q", "").strip()
     page  = request.args.get("page", 1, type=int)
-    if not query:
-        return err("Parameter 'q' diperlukan", 400)
+    if not query: return err("Parameter 'q' diperlukan", 400)
     data = _do_search(query, page)
     return ok(data) if data else err("Gagal melakukan pencarian")
 
@@ -342,8 +450,7 @@ def route_genres():
     def _do_genres():
         soup = _get("/")
         if not soup: return None
-        genres = []
-        seen   = set()
+        genres, seen = [], set()
         for sel in [".genre a", ".genres a", "a[href*='/genre/']"]:
             for a in soup.select(sel):
                 name = a.get_text(strip=True)
@@ -359,12 +466,12 @@ def route_genres():
 
 @app.route("/anime/schedule")
 def route_schedule():
-    def _fetch_schedule():
+    def _fetch():
         soup = _get("/")
         if not soup: return None
         sched = _do_schedule_raw(soup)
         return {"days": [{"day": d, "animeList": items} for d, items in sched.items()]}
-    data = _cached("schedule", "schedule", _fetch_schedule)
+    data = _cached("schedule", "schedule", _fetch)
     return ok(data) if data else err("Gagal mengambil jadwal")
 
 @app.route("/health")
