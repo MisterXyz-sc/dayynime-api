@@ -6,6 +6,7 @@ Dayynime API — Real scraper + halaman dokumentasi
 from flask import Flask, jsonify, request, render_template_string
 from bs4 import BeautifulSoup
 from markupsafe import Markup
+from collections import defaultdict
 import cloudscraper, base64, re, json as _json, time
 
 app = Flask(__name__)
@@ -18,6 +19,97 @@ CACHE_TTL = {
     "detail": 600, "episode": 180, "genres": 3600,
     "schedule": 1800,
 }
+
+# ── Rate Limiter ──────────────────────────────────────────────
+RATE_LIMIT    = 100   # max request normal
+RATE_WINDOW   = 60    # per 60 detik (1 menit)
+WARN_COUNT    = 3     # jumlah peringatan sebelum ban
+BAN_DURATION  = 300   # ban 5 menit (detik)
+
+_rate_store   = defaultdict(list)   # { ip: [timestamp, ...] }
+_warn_store   = defaultdict(int)    # { ip: jumlah_peringatan }
+_ban_store    = {}                  # { ip: ban_until_timestamp }
+
+def _get_ip():
+    return (
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or request.headers.get("x-real-ip", "")
+        or request.remote_addr
+        or "unknown"
+    )
+
+@app.before_request
+def check_rate_limit():
+    if not request.path.startswith("/anime/"):
+        return
+
+    ip  = _get_ip()
+    now = time.time()
+
+    # ── Cek apakah sedang kena ban ──
+    if ip in _ban_store:
+        ban_until = _ban_store[ip]
+        if now < ban_until:
+            sisa = int(ban_until - now)
+            resp = jsonify({
+                "status":      "banned",
+                "message":     f"🚫 IP kamu di-ban sementara karena melebihi batas request. Coba lagi dalam {sisa} detik.",
+                "retry_after": sisa,
+                "ban_duration": BAN_DURATION,
+            })
+            resp.status_code = 429
+            resp.headers["Retry-After"] = str(sisa)
+            return resp
+        else:
+            # Ban sudah habis, reset
+            del _ban_store[ip]
+            _warn_store[ip] = 0
+
+    # ── Hitung request dalam window ──
+    _rate_store[ip] = [t for t in _rate_store[ip] if now - t < RATE_WINDOW]
+    req_count = len(_rate_store[ip])
+
+    if req_count < RATE_LIMIT:
+        # Masih aman, catat request
+        _rate_store[ip].append(now)
+        return
+
+    # ── Sudah melebihi limit, beri peringatan dulu ──
+    _warn_store[ip] += 1
+    warn_ke = _warn_store[ip]
+
+    if warn_ke <= WARN_COUNT:
+        # Masih dalam tahap peringatan
+        oldest = min(_rate_store[ip])
+        retry  = int(RATE_WINDOW - (now - oldest)) + 1
+        sisa_warn = WARN_COUNT - warn_ke
+        resp = jsonify({
+            "status":       "warning",
+            "message":      f"⚠️ Peringatan {warn_ke}/{WARN_COUNT}: Kamu melebihi batas {RATE_LIMIT} request per menit! {'Sisa ' + str(sisa_warn) + ' peringatan sebelum di-ban.' if sisa_warn > 0 else 'Ini peringatan terakhir! Request berikutnya akan di-ban.'}",
+            "warning_ke":   warn_ke,
+            "sisa_peringatan": sisa_warn,
+            "retry_after":  retry,
+            "limit":        RATE_LIMIT,
+        })
+        resp.status_code = 429
+        resp.headers["Retry-After"]       = str(retry)
+        resp.headers["X-RateLimit-Limit"] = str(RATE_LIMIT)
+        resp.headers["X-Warning-Count"]   = str(warn_ke)
+        return resp
+    else:
+        # Peringatan habis → BAN
+        _ban_store[ip] = now + BAN_DURATION
+        _warn_store[ip] = 0
+        _rate_store[ip] = []
+        resp = jsonify({
+            "status":       "banned",
+            "message":      f"🚫 IP kamu di-ban selama {BAN_DURATION // 60} menit karena terus melebihi batas request setelah {WARN_COUNT}x peringatan.",
+            "retry_after":  BAN_DURATION,
+            "ban_duration": BAN_DURATION,
+        })
+        resp.status_code = 429
+        resp.headers["Retry-After"] = str(BAN_DURATION)
+        return resp
 
 # ══════════════════════════════════════════════════════
 # SCRAPER CORE
