@@ -12,6 +12,7 @@ import cloudscraper, base64, re, json as _json, time
 app = Flask(__name__)
 
 BASE_URL  = "https://v1.animasu.app"
+BASE_SHK  = "https://v1.samehadaku.how"   # Samehadaku source
 CACHE     = {}
 CACHE_TTL = {
     "home": 300, "ongoing": 180, "completed": 600,
@@ -148,6 +149,35 @@ def _get(path_or_url):
     except Exception as e:
         print(f"Fetch error [{url}]: {e}")
         return None
+
+def _get_shk(path_or_url, retries=4):
+    """CF bypass multi-strategy khusus samehadaku."""
+    url = path_or_url if path_or_url.startswith("http") else BASE_SHK + path_or_url
+    strategies = [
+        {"browser": {"browser": "chrome",  "platform": "windows", "mobile": False}},
+        {"browser": {"browser": "chrome",  "platform": "linux",   "mobile": False}},
+        {"browser": {"browser": "firefox", "platform": "windows", "mobile": False}},
+        {"browser": {"browser": "chrome",  "platform": "android", "mobile": True}},
+    ]
+    headers_base = {
+        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8",
+        "Referer":         BASE_SHK + "/",
+    }
+    for i in range(retries):
+        try:
+            if i > 0: time.sleep(i * 1.5)
+            s = cloudscraper.create_scraper(**strategies[i % len(strategies)])
+            ua = ("Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36"
+                  if i == 3 else
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
+            s.headers.update({**headers_base, "User-Agent": ua})
+            r = s.get(url, timeout=20)
+            if r.status_code == 200:
+                return BeautifulSoup(r.text, "html.parser")
+        except Exception as e:
+            print(f"[shk] attempt {i+1} error: {e}")
+    return None
 
 def ok(data):
     return jsonify({"status": "success", "data": data})
@@ -316,6 +346,225 @@ def _do_episode(episode_slug):
 # DOCS UI
 # ══════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════
+# SAMEHADAKU SCRAPER FUNCTIONS
+# ══════════════════════════════════════════════════════
+
+def _shk_get_cards(soup):
+    for sel in [".animposx", ".thumb", ".bsx", ".bs", ".animcon"]:
+        cards = soup.select(sel)
+        if len(cards) >= 3: return cards
+    return []
+
+def _shk_shk_parse_card(card):
+    data = {}
+    el = card.select_one("h2, h3, .tt, .ntitle, a[title]")
+    if el:
+        data["title"] = el.get_text(strip=True) or el.get("title", "")
+    a = card.select_one("a[href]")
+    if a:
+        href = a.get("href", "")
+        data["url"]     = href
+        data["animeId"] = href.rstrip("/").split("/")[-1]
+    img = card.select_one("img[src], img[data-src], img[data-lazy-src]")
+    if img:
+        data["poster"] = img.get("src") or img.get("data-src") or img.get("data-lazy-src") or ""
+    el = card.select_one(".epx, .eggepisode, .ep, .l2")
+    if el: data["episodes"] = el.get_text(strip=True)
+    el = card.select_one(".typez, .type, .etiket")
+    if el: data["type"] = el.get_text(strip=True)
+    el = card.select_one(".score, .numscore, .rating")
+    if el: data["score"] = el.get_text(strip=True)
+    return data
+
+def _shk_pagination(soup):
+    pag = {"hasNextPage": False, "hasPrevPage": False, "currentPage": 1}
+    if soup.select_one(".next.page-numbers, a.next, [rel='next']"): pag["hasNextPage"] = True
+    if soup.select_one(".prev.page-numbers, a.prev, [rel='prev']"): pag["hasPrevPage"] = True
+    cur = soup.select_one(".page-numbers.current")
+    if cur:
+        try: pag["currentPage"] = int(cur.get_text(strip=True))
+        except: pass
+    return pag
+
+def _shk_shk_do_schedule_raw(soup):
+    schedule = {}
+    days_map = {
+        "sunday":"Minggu","monday":"Senin","tuesday":"Selasa",
+        "wednesday":"Rabu","thursday":"Kamis","friday":"Jumat","saturday":"Sabtu",
+        "minggu":"Minggu","senin":"Senin","selasa":"Selasa",
+        "rabu":"Rabu","kamis":"Kamis","jumat":"Jumat","sabtu":"Sabtu",
+    }
+    for day_el in soup.select(".schedulelist, .schedule .day, .jadwal-hari, .scheduleday"):
+        day_name_el = day_el.select_one("h2, h3, .day-name, strong, .title")
+        if not day_name_el: continue
+        raw      = day_name_el.get_text(strip=True).lower()
+        day_name = days_map.get(raw, raw.title())
+        items    = []
+        for a in day_el.select("li a, .animepost a, .bs a"):
+            items.append({"title": a.get_text(strip=True), "animeId": a["href"].rstrip("/").split("/")[-1], "url": a["href"]})
+        if items: schedule[day_name] = items
+    return schedule
+
+def _shk_do_home():
+    soup = _get_shk("/")
+    if not soup: return None
+    cards = _shk_get_cards(soup)
+    return {"animeList": [r for r in [_shk_parse_card(c) for c in cards] if r.get("title")]}
+
+def _shk_do_list(status, page):
+    url_map = {"movie": f"/anime/?type=movie&page={page}", "popular": f"/anime/?order=popular&page={page}"}
+    soup = _get(url_map.get(status, f"/anime/?status={status}&page={page}"))
+    if not soup: return None
+    return {"animeList": [_shk_parse_card(c) for c in _shk_get_cards(soup)], "pagination": _shk_pagination(soup)}
+
+def _shk_do_search(query, page):
+    soup = _get_shk(f"/page/{page}/?s={query}" if page > 1 else f"/?s={query}")
+    if not soup: return None
+    return {"animeList": [_shk_parse_card(c) for c in _shk_get_cards(soup)], "pagination": _shk_pagination(soup), "query": query}
+
+def _shk_do_detail(slug):
+    soup = _get_shk(f"/anime/{slug}/")
+    if not soup: return None
+    data = {"animeId": slug, "title": "", "poster": "", "synopsis": "", "status": "", "type": "", "score": "", "studio": "", "released": "", "genres": [], "info": {}, "episodeList": []}
+    el = soup.select_one(".entry-title, h1.title, h1")
+    if el: data["title"] = el.get_text(strip=True)
+    el = soup.select_one(".thumb img, .poster img, .wp-post-image")
+    if el: data["poster"] = el.get("src") or el.get("data-src", "")
+    el = soup.select_one(".entry-content p, .sinopsis p, .desc p")
+    if el: data["synopsis"] = el.get_text(strip=True)
+    for row in soup.select(".spe span, .infox .spe span"):
+        text = row.get_text(" ", strip=True)
+        if ":" in text:
+            k, _, v = text.partition(":")
+            key, val = k.strip().lower(), v.strip()
+            data["info"][key] = val
+            if "status" in key: data["status"] = val
+            if "tipe" in key or "type" in key: data["type"] = val
+            if "skor" in key or "score" in key: data["score"] = val
+            if "studio" in key: data["studio"] = val
+            if "tayang" in key or "rilis" in key: data["released"] = val
+    for a in soup.select(".genre-info a, .genxed a, .spe a[href*='genre']"):
+        name = a.get_text(strip=True)
+        slug_g = a["href"].rstrip("/").split("/")[-1]
+        if name and slug_g: data["genres"].append({"name": name, "genreId": slug_g})
+    ep_links = soup.select("#daftarepisode li a") or soup.select("ul li a[href*='episode']")
+    for a in ep_links:
+        ep_slug = a.get("href", "").rstrip("/").split("/")[-1]
+        m = re.search(r"episode[- ](\d+(?:\.\d+)?)", ep_slug, re.I)
+        li = a.find_parent("li")
+        ep_date = li.select_one(".date, .epl-date") if li else None
+        data["episodeList"].append({"episodeId": ep_slug, "title": a.get_text(strip=True), "num": m.group(1) if m else "", "date": ep_date.get_text(strip=True) if ep_date else ""})
+    return data
+
+def _shk_do_episode(episode_slug):
+    soup = _get_shk(f"/{episode_slug}/")
+    if not soup: return None
+    data = {"episodeId": episode_slug, "title": "", "animeId": "", "episodeNum": "", "prevEpisode": None, "nextEpisode": None, "defaultEmbed": "", "servers": []}
+    el = soup.select_one(".entry-title, h1")
+    if el: data["title"] = el.get_text(strip=True)
+    m = re.match(r"nonton-(.+?)-episode-\d", episode_slug)
+    if m: data["animeId"] = m.group(1)
+    m = re.search(r"episode[- ](\d+(?:\.\d+)?)", episode_slug, re.I)
+    if m: data["episodeNum"] = m.group(1)
+    for a in soup.select(".nvs a, .naveps a, .nflx a, .episodenav a"):
+        href = a.get("href", "")
+        text = a.get_text(strip=True).lower()
+        slug_nav = href.rstrip("/").split("/")[-1]
+        if any(w in text for w in ["sebelum", "prev", "◄", "←", "«"]): data["prevEpisode"] = slug_nav
+        elif any(w in text for w in ["selanjut", "next", "►", "→", "»"]): data["nextEpisode"] = slug_nav
+    iframe = soup.select_one("#pembed iframe, #embed_holder iframe")
+    if iframe: data["defaultEmbed"] = iframe.get("src", "")
+    servers = []
+    for opt in soup.select("select option"):
+        val = opt.get("value", "").strip()
+        label = opt.get_text(strip=True)
+        if not val or not label or label == "Pilih Server/Kualitas": continue
+        embed_url = _decode_server(val)
+        if embed_url: servers.append({"name": label, "embedUrl": embed_url, "type": _detect_server_type(embed_url)})
+    if not servers:
+        for btn in soup.select(".server a, .mirrorlist a, .btn-eps a"):
+            embed_url = btn.get("href") or btn.get("data-src") or btn.get("data-video", "")
+            if embed_url: servers.append({"name": btn.get_text(strip=True), "embedUrl": embed_url, "type": _detect_server_type(embed_url)})
+    data["servers"] = servers
+    # ── AJAX player_ajax (samehadaku/eastplay) ──
+    if not data["servers"]:
+        options = soup.select(".east_player_option[data-post]")
+        if options:
+            post_id = options[0].get("data-post", "")
+            s_ajax = cloudscraper.create_scraper(browser={"browser": "firefox", "platform": "windows", "mobile": False})
+            s_ajax.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+                "Referer": f"{BASE_SHK}/{episode_slug}/",
+                "X-Requested-With": "XMLHttpRequest",
+            })
+            for opt in options:
+                nume = opt.get("data-nume", "")
+                lbl = opt.select_one("span")
+                name = lbl.get_text(strip=True) if lbl else f"Server {nume}"
+                try:
+                    resp = s_ajax.post(f"{BASE_SHK}/wp-admin/admin-ajax.php",
+                        data={"action": "player_ajax", "post": post_id, "nume": nume, "type": "schtml"}, timeout=10)
+                    if resp.status_code == 200 and resp.text.strip():
+                        iframe_soup = BeautifulSoup(resp.text, "html.parser")
+                        iframe = iframe_soup.find("iframe")
+                        embed_url = iframe.get("src", "") if iframe else ""
+                        if not embed_url:
+                            m2 = re.search(r'src=["\'](.*?)["\']', resp.text)
+                            embed_url = m2.group(1) if m2 else ""
+                        if embed_url:
+                            if not data["defaultEmbed"]: data["defaultEmbed"] = embed_url
+                            data["servers"].append({"name": name, "embedUrl": embed_url, "type": _detect_server_type(embed_url)})
+                except Exception as e:
+                    print(f"[shk ep ajax] {name}: {e}")
+
+    return data
+
+# ══════════════════════════════════════════════════════
+# DOCS UI
+# ══════════════════════════════════════════════════════
+
+def _shk_do_genres():
+    VALID = {"action","adventure","comedy","drama","fantasy","horror","mystery","romance",
+             "sci-fi","slice-of-life","supernatural","thriller","sports","music","school",
+             "shounen","shoujo","seinen","josei","mecha","military","historical","psychological",
+             "ecchi","harem","magic","martial-arts","game","demons","parody","police","samurai",
+             "space","super-power","vampire","gore","urban-fantasy","teamsports","isekai","team"}
+    soup = _get_shk("/")
+    if not soup: return None
+    genres, seen = [], set()
+    for a in soup.find_all("a", href=True):
+        href = a.get("href",""); name = a.get_text(strip=True)
+        slug = href.rstrip("/").split("/")[-1]
+        if name and slug and slug not in seen and "/genre/" in href and slug.lower() in VALID:
+            seen.add(slug); genres.append({"name": name, "genreId": slug, "url": href})
+    return {"genreList": genres}
+
+def _shk_do_schedule():
+    DAYS_MAP = {"monday":"Senin","tuesday":"Selasa","wednesday":"Rabu",
+                "thursday":"Kamis","friday":"Jumat","saturday":"Sabtu","sunday":"Minggu"}
+    result = []
+    s = cloudscraper.create_scraper(browser={"browser":"firefox","platform":"windows","mobile":False})
+    s.headers.update({"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+                      "Accept":"application/json","Referer":f"{BASE_SHK}/jadwal-rilis/"})
+    for day_en, day_id in DAYS_MAP.items():
+        try:
+            r = s.get(f"{BASE_SHK}/wp-json/custom/v1/all-schedule?perpage=20&day={day_en}", timeout=15)
+            if r.status_code != 200: result.append({"day": day_id, "animeList": []}); continue
+            items_raw = r.json()
+            if not isinstance(items_raw, list): result.append({"day": day_id, "animeList": []}); continue
+            result.append({"day": day_id, "animeList": [{
+                "title":   i.get("title",""),   "animeId": i.get("slug",""),
+                "url":     i.get("url",""),      "poster":  i.get("featured_img_src",""),
+                "score":   i.get("east_score",""), "type":  i.get("east_type",""),
+                "time":    i.get("east_time",""), "genre":  i.get("genre",""),
+            } for i in items_raw]})
+        except Exception as e:
+            print(f"[shk schedule] {day_en}: {e}")
+            result.append({"day": day_id, "animeList": []})
+    return {"days": result}
+
+
 ENDPOINTS_DOCS = [
     {"title": "Halaman Home", "path": "/anime/home", "description": "Mengambil data homepage — daftar anime ongoing terbaru dan anime populer.", "response": {"status": "success", "data": {"ongoing": [{"animeId": "one-piece", "title": "One Piece", "poster": "https://...", "episodes": "Episode 1122", "type": "TV", "score": "9.1"}], "popular": [], "schedule": {}}}},
     {"title": "Anime Ongoing", "path": "/anime/ongoing?page=1", "description": "Daftar anime yang sedang tayang.", "response": {"status": "success", "data": {"animeList": [{"animeId": "slug", "title": "Judul Anime", "poster": "https://...", "episodes": "Episode 7", "type": "TV", "score": "7.5"}], "pagination": {"hasNextPage": True, "hasPrevPage": False, "currentPage": 1}}}},
@@ -327,8 +576,360 @@ ENDPOINTS_DOCS = [
     {"title": "Detail Episode + Server", "path": "/anime/episode/{slug}", "description": "Detail episode beserta daftar server streaming.", "example": "Contoh: /anime/episode/nonton-naruto-episode-1", "response": {"status": "success", "data": {"episodeId": "nonton-naruto-episode-1", "title": "Nonton Naruto Episode 1", "animeId": "naruto", "episodeNum": "1", "prevEpisode": None, "nextEpisode": "nonton-naruto-episode-2", "defaultEmbed": "https://...", "servers": [{"name": "720p", "embedUrl": "https://...", "type": "vidhide"}]}}},
     {"title": "Daftar Genre", "path": "/anime/genres", "description": "Semua genre anime yang tersedia.", "response": {"status": "success", "data": {"genreList": [{"name": "Action", "genreId": "action"}, {"name": "Comedy", "genreId": "comedy"}]}}},
     {"title": "Jadwal Rilis", "path": "/anime/schedule", "description": "Jadwal rilis anime per hari.", "response": {"status": "success", "data": {"days": [{"day": "Senin", "animeList": []}, {"day": "Selasa", "animeList": []}]}}},
+    # ── Samehadaku endpoints ──
+    {
+        "title": "[SHK] Halaman Home",
+        "path": "/shk/anime/home",
+        "description": "Mengambil data homepage — daftar anime terbaru beserta jadwal tayang per hari.",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeList": [
+                    {
+                        "animeId": "jigokuraku-season-2",
+                        "title": "Jigokuraku Season 2",
+                        "poster": "https://v1.samehadaku.how/wp-content/uploads/2026/03/Jigokuraku-21.jpg",
+                        "url": "https://v1.samehadaku.how/anime/jigokuraku-season-2/"
+                    },
+                    {
+                        "animeId": "ikoku-nikki",
+                        "title": "Ikoku Nikki",
+                        "poster": "https://v1.samehadaku.how/wp-content/uploads/2026/03/AkVMvscYWWr.png",
+                        "url": "https://v1.samehadaku.how/anime/ikoku-nikki/"
+                    }
+                ],
+                "schedule": []
+            }
+        }
+    },
+    {
+        "title": "[SHK] Anime Ongoing",
+        "path": "/shk/anime/ongoing?page=1",
+        "description": "Daftar anime yang sedang tayang. Gunakan parameter `page` untuk navigasi halaman.",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeList": [
+                    {
+                        "animeId": "jujutsu-kaisen-season-3",
+                        "title": "Jujutsu Kaisen Season 3",
+                        "poster": "https://v1.samehadaku.how/wp-content/uploads/...",
+                        "type": "TV",
+                        "score": "8.7",
+                        "url": "https://v1.samehadaku.how/anime/jujutsu-kaisen-season-3/"
+                    }
+                ],
+                "pagination": {
+                    "hasNextPage": true,
+                    "hasPrevPage": false,
+                    "currentPage": 1
+                }
+            }
+        }
+    },
+    {
+        "title": "[SHK] Anime Completed",
+        "path": "/shk/anime/completed?page=1",
+        "description": "Daftar anime yang sudah selesai tayang.",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeList": [
+                    {
+                        "animeId": "naruto-kecil",
+                        "title": "Naruto Kecil",
+                        "poster": "https://v1.samehadaku.how/wp-content/uploads/2024/08/142503.jpg",
+                        "type": "TV",
+                        "score": "8.84"
+                    }
+                ],
+                "pagination": {
+                    "hasNextPage": true,
+                    "hasPrevPage": false,
+                    "currentPage": 1
+                }
+            }
+        }
+    },
+    {
+        "title": "[SHK] Anime Movie",
+        "path": "/shk/anime/movies?page=1",
+        "description": "Daftar anime dengan tipe Movie.",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeList": [
+                    {
+                        "animeId": "blue-lock-episode-nagi",
+                        "title": "Blue Lock: Episode Nagi",
+                        "poster": "https://v1.samehadaku.how/wp-content/uploads/...",
+                        "type": "Movie",
+                        "score": "7.9"
+                    }
+                ],
+                "pagination": {
+                    "hasNextPage": true,
+                    "hasPrevPage": false,
+                    "currentPage": 1
+                }
+            }
+        }
+    },
+    {
+        "title": "[SHK] Anime Populer",
+        "path": "/shk/anime/popular?page=1",
+        "description": "Daftar anime terpopuler berdasarkan jumlah penonton.",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeList": [
+                    {
+                        "animeId": "naruto-shippuden",
+                        "title": "Naruto: Shippuuden",
+                        "poster": "https://v1.samehadaku.how/wp-content/uploads/2020/05/17407.jpg",
+                        "type": "TV",
+                        "score": "8.15"
+                    }
+                ],
+                "pagination": {
+                    "hasNextPage": true,
+                    "hasPrevPage": false,
+                    "currentPage": 1
+                }
+            }
+        }
+    },
+    {
+        "title": "[SHK] Cari Anime",
+        "path": "/shk/anime/search?q={query}",
+        "description": "Cari anime berdasarkan judul. Gunakan parameter `q` untuk kata kunci pencarian.",
+        "example": "Contoh: /anime/search?q=naruto",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeList": [
+                    {
+                        "animeId": "naruto-kecil",
+                        "title": "Naruto Kecil",
+                        "poster": "https://v1.samehadaku.how/wp-content/uploads/2024/08/142503.jpg",
+                        "score": "8.84",
+                        "type": "TV",
+                        "url": "https://v1.samehadaku.how/anime/naruto-kecil/"
+                    },
+                    {
+                        "animeId": "naruto-shippuden",
+                        "title": "Naruto: Shippuuden",
+                        "poster": "https://v1.samehadaku.how/wp-content/uploads/2020/05/17407.jpg",
+                        "score": "8.15",
+                        "type": "TV",
+                        "url": "https://v1.samehadaku.how/anime/naruto-shippuden/"
+                    }
+                ],
+                "pagination": {
+                    "hasNextPage": false,
+                    "hasPrevPage": false,
+                    "currentPage": 1
+                }
+            }
+        }
+    },
+    {
+        "title": "[SHK] Detail Lengkap Anime",
+        "path": "/shk/anime/detail/{slug}",
+        "description": "Detail lengkap sebuah anime beserta daftar episode. Slug diambil dari field `animeId`.",
+        "example": "Contoh: /anime/detail/ikoku-nikki",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeId": "ikoku-nikki",
+                "title": "Ikoku Nikki Sub Indo",
+                "poster": "https://v1.samehadaku.how/wp-content/uploads/2026/01/154233-1.jpg",
+                "synopsis": "Novelis berusia 35 tahun, Makio Koudai, tidak pernah memiliki hubungan yang baik dengan kakak perempuannya...",
+                "status": "",
+                "type": "",
+                "score": "",
+                "studio": "",
+                "info": {
+                    "released": "Jan 4, 2026 to ?"
+                },
+                "genres": [
+                    {
+                        "name": "Drama",
+                        "genreId": "drama"
+                    }
+                ],
+                "episodeList": [
+                    {
+                        "episodeId": "ikoku-nikki-episode-9",
+                        "num": "9",
+                        "title": "Ikoku Nikki Episode 9",
+                        "date": "2 March 2026"
+                    },
+                    {
+                        "episodeId": "ikoku-nikki-episode-8",
+                        "num": "8",
+                        "title": "Ikoku Nikki Episode 8",
+                        "date": "23 February 2026"
+                    }
+                ]
+            }
+        }
+    },
+    {
+        "title": "[SHK] Detail Episode + Server",
+        "path": "/shk/anime/episode/{slug}",
+        "description": "Detail episode beserta semua server streaming. Server di-fetch via AJAX dari sumber langsung.",
+        "example": "Contoh: /anime/episode/ikoku-nikki-episode-9",
+        "response": {
+            "status": "success",
+            "data": {
+                "episodeId": "ikoku-nikki-episode-9",
+                "title": "Ikoku Nikki Episode 9 Sub Indo",
+                "animeId": "ikoku-nikki",
+                "episodeNum": "9",
+                "prevEpisode": "ikoku-nikki-episode-8",
+                "nextEpisode": null,
+                "defaultEmbed": "https://www.blogger.com/video.g?token=AD6v5dx...",
+                "servers": [
+                    {
+                        "name": "Blogspot 360p",
+                        "embedUrl": "https://www.blogger.com/video.g?token=...",
+                        "type": "blogger"
+                    },
+                    {
+                        "name": "Wibufile 480p",
+                        "embedUrl": "https://api.wibufile.com/embed/f4154c9e-...",
+                        "type": "embed"
+                    },
+                    {
+                        "name": "Wibufile 720p",
+                        "embedUrl": "https://s0.wibufile.com/video01/IkoNiki-9-MP4HD.mp4",
+                        "type": "mp4"
+                    },
+                    {
+                        "name": "Wibufile 1080p",
+                        "embedUrl": "https://s0.wibufile.com/video01/IkoNiki-9-FULLHD.mp4",
+                        "type": "mp4"
+                    },
+                    {
+                        "name": "Mega 480p",
+                        "embedUrl": "https://mega.nz/embed/u9xARRpA#LCBe...",
+                        "type": "mega"
+                    },
+                    {
+                        "name": "Mega 720p",
+                        "embedUrl": "https://mega.nz/embed/qqAzxSZK#Cucz...",
+                        "type": "mega"
+                    },
+                    {
+                        "name": "Mega 1080p",
+                        "embedUrl": "https://mega.nz/embed/294WVJjD#nFq9...",
+                        "type": "mega"
+                    },
+                    {
+                        "name": "Pucuk 1080p",
+                        "embedUrl": "https://filedon.co/embed/4X6TdLGidf",
+                        "type": "embed"
+                    }
+                ]
+            }
+        }
+    },
+    {
+        "title": "[SHK] Daftar Genre",
+        "path": "/shk/anime/genres",
+        "description": "Semua genre anime yang tersedia di sumber.",
+        "response": {
+            "status": "success",
+            "data": {
+                "genreList": [
+                    {
+                        "name": "Action",
+                        "genreId": "action",
+                        "url": "https://v1.samehadaku.how/genre/action/"
+                    },
+                    {
+                        "name": "Comedy",
+                        "genreId": "comedy",
+                        "url": "https://v1.samehadaku.how/genre/comedy/"
+                    },
+                    {
+                        "name": "Drama",
+                        "genreId": "drama",
+                        "url": "https://v1.samehadaku.how/genre/drama/"
+                    },
+                    {
+                        "name": "Fantasy",
+                        "genreId": "fantasy",
+                        "url": "https://v1.samehadaku.how/genre/fantasy/"
+                    },
+                    {
+                        "name": "Romance",
+                        "genreId": "romance",
+                        "url": "https://v1.samehadaku.how/genre/romance/"
+                    }
+                ]
+            }
+        }
+    },
+    {
+        "title": "[SHK] Jadwal Rilis",
+        "path": "/shk/anime/schedule",
+        "description": "Jadwal rilis anime per hari dalam seminggu. Data diambil dari REST API sumber langsung.",
+        "response": {
+            "status": "success",
+            "data": {
+                "days": [
+                    {
+                        "day": "Senin",
+                        "animeList": [
+                            {
+                                "title": "Kizoku Tensei",
+                                "animeId": "kizoku-tensei-megumareta-umare-kara-saikyou-no-chikara-wo-eru",
+                                "url": "https://v1.samehadaku.how/anime/kizoku-tensei-...",
+                                "poster": "https://v1.samehadaku.how/wp-content/uploads/2026/01/Kizoku-Tensei.jpg",
+                                "score": "6.21",
+                                "type": "TV",
+                                "time": "01:00",
+                                "genre": "Action, Adventure"
+                            }
+                        ]
+                    },
+                    {
+                        "day": "Selasa",
+                        "animeList": [
+                            {
+                                "title": "Golden Kamuy Final Season",
+                                "animeId": "golden-kamuy-final-season",
+                                "url": "https://v1.samehadaku.how/anime/golden-kamuy-final-season/",
+                                "poster": "https://v1.samehadaku.how/wp-content/uploads/...",
+                                "score": "8.1",
+                                "type": "TV",
+                                "time": "23:00",
+                                "genre": "Action, Adventure"
+                            }
+                        ]
+                    },
+                    {
+                        "day": "Jumat",
+                        "animeList": [
+                            {
+                                "title": "Jujutsu Kaisen Season 3",
+                                "animeId": "jujutsu-kaisen-season-3",
+                                "url": "https://v1.samehadaku.how/anime/jujutsu-kaisen-season-3/",
+                                "poster": "https://v1.samehadaku.how/wp-content/uploads/...",
+                                "score": "8.7",
+                                "type": "TV",
+                                "time": "23:30",
+                                "genre": "Action, Fantasy"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    },
 ]
-
 def highlight_json(value):
     text = _json.dumps(value, indent=2, ensure_ascii=False)
     def rep(m):
@@ -381,6 +982,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 .section-icon{font-size:22px}
 .section-title{font-size:20px;font-weight:800;color:var(--text)}
 .section-line{flex:1;height:2px;background:linear-gradient(to right,var(--accent),transparent)}
+.section-header.shk .section-line{background:linear-gradient(to right,var(--blue),transparent)}
+.section-header.shk .section-title{color:var(--blue)}
+.ep-card.shk{border-left-color:var(--blue)}
+.ep-card.shk:hover{border-color:rgba(56,189,248,0.4)}
+.ep-card.shk .method-pill{background:rgba(56,189,248,0.1);color:var(--blue);border-color:rgba(56,189,248,0.2)}
+.section-gap{margin-top:36px}
 .ep-card{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;margin-bottom:14px;overflow:hidden;transition:border-color 0.2s,box-shadow 0.2s}
 .ep-card:hover{border-color:rgba(232,80,26,0.4);box-shadow:0 4px 24px rgba(0,0,0,0.3)}
 .ep-header{display:flex;align-items:center;gap:12px;padding:16px 20px;cursor:pointer;user-select:none}
@@ -437,7 +1044,8 @@ pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
   </div>
   <div class="header-stats">
     <div class="stat"><strong>{{ endpoints|length }}</strong>Endpoints</div>
-    <div class="stat"><strong>v1.animasu.app</strong>Sumber</div>
+    <div class="stat"><strong>v1.animasu.app</strong>Animasu</div>
+    <div class="stat"><strong>v1.samehadaku.how</strong>Samehadaku</div>
     <div class="stat"><strong>Flask</strong>Framework</div>
     <div class="stat"><strong>JSON</strong>Format</div>
   </div>
@@ -454,12 +1062,13 @@ pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
     <div class="rl-roast">MINIMAL TAU DIRI.. DI KASI AKSES GRATIS MALAH NGELUNJAK</div>
   </div>
 
+  <!-- Animasu Endpoints -->
   <div class="section-header">
     <span class="section-icon">📡</span>
     <span class="section-title">Dayynime API Endpoints</span>
     <div class="section-line"></div>
   </div>
-  {% for ep in endpoints %}
+  {% for ep in endpoints_animasu %}
   <div class="ep-card" id="ep{{loop.index}}">
     <div class="ep-header" onclick="toggle(this)">
       <span class="method-pill">GET</span>
@@ -489,6 +1098,43 @@ pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
     </div>
   </div>
   {% endfor %}
+
+  <!-- Samehadaku Endpoints -->
+  <div class="section-header shk section-gap">
+    <span class="section-icon">🌊</span>
+    <span class="section-title">Samehadaku API Endpoints</span>
+    <div class="section-line"></div>
+  </div>
+  {% for ep in endpoints_shk %}
+  <div class="ep-card shk" id="shk{{loop.index}}">
+    <div class="ep-header" onclick="toggle(this)">
+      <span class="method-pill">GET</span>
+      <span class="ep-title">{{ ep.title }}</span>
+      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="path-box">
+      <span class="path-method">GET</span>
+      {% set parts = ep.path.split('{') %}
+      {% if parts|length > 1 %}
+        <span class="path-static">{{ parts[0] }}</span><span class="path-param">{{'{{'}}{{ parts[1] }}</span>
+      {% else %}
+        <span class="path-static">{{ ep.path }}</span>
+      {% endif %}
+    </div>
+    <div class="ep-body">
+      <p class="ep-desc">{{ ep.description }}</p>
+      {% if ep.example is defined %}<p class="ep-example">📌 <span>{{ ep.example }}</span></p>{% endif %}
+      <div class="json-label-row">
+        <span class="json-label-text">Response JSON</span>
+        <button class="copy-btn" onclick="copyJson(event,this,'shk_pre{{loop.index}}')">Copy</button>
+      </div>
+      <div class="json-wrap">
+        <div class="json-bar"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div></div>
+        <pre id="shk_pre{{loop.index}}">{{ ep.json_html }}</pre>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
 </div>
 <div class="footer">Dayynime API v1.0.0 &nbsp;·&nbsp; Source: <a href="https://v1.animasu.app" target="_blank">v1.animasu.app</a> &nbsp;·&nbsp; Built with Flask + cloudscraper</div>
 <script>
@@ -504,12 +1150,21 @@ function copyJson(e,btn,id){e.stopPropagation();const text=document.getElementBy
 
 @app.route("/")
 def index():
-    endpoints_rendered = []
+    animasu_rendered, shk_rendered = [], []
     for ep in ENDPOINTS_DOCS:
         ep2 = dict(ep)
         ep2["json_html"] = Markup(highlight_json(ep["response"]))
-        endpoints_rendered.append(ep2)
-    return render_template_string(HTML, endpoints=endpoints_rendered)
+        if ep["title"].startswith("[SHK]"):
+            # Hapus prefix [SHK] dari judul untuk tampilan
+            ep2["title"] = ep["title"][6:]
+            shk_rendered.append(ep2)
+        else:
+            animasu_rendered.append(ep2)
+    return render_template_string(HTML,
+        endpoints_animasu=animasu_rendered,
+        endpoints_shk=shk_rendered,
+        endpoints=animasu_rendered + shk_rendered,  # fallback
+    )
 
 @app.route("/anime/home")
 def route_home():
@@ -586,6 +1241,67 @@ def route_schedule():
         return {"days": [{"day": d, "animeList": items} for d, items in sched.items()]}
     data = _cached("schedule", "schedule", _fetch)
     return ok(data) if data else err("Gagal mengambil jadwal")
+
+# ══════════════════════════════════════════════════════
+# SAMEHADAKU ROUTES  (/shk/anime/*)
+# ══════════════════════════════════════════════════════
+
+@app.route("/shk/anime/home")
+def shk_home():
+    data = _cached("shk_home", "home", _shk_do_home)
+    return ok(data) if data else err("Gagal mengambil home samehadaku")
+
+@app.route("/shk/anime/ongoing")
+def shk_ongoing():
+    page = request.args.get("page", 1, type=int)
+    data = _cached(f"shk_ongoing_{page}", "ongoing", lambda: _shk_do_list("ongoing", page))
+    return ok(data) if data else err("Gagal mengambil ongoing samehadaku")
+
+@app.route("/shk/anime/completed")
+def shk_completed():
+    page = request.args.get("page", 1, type=int)
+    data = _cached(f"shk_completed_{page}", "completed", lambda: _shk_do_list("completed", page))
+    return ok(data) if data else err("Gagal mengambil completed samehadaku")
+
+@app.route("/shk/anime/movies")
+def shk_movies():
+    page = request.args.get("page", 1, type=int)
+    data = _cached(f"shk_movies_{page}", "movies", lambda: _shk_do_list("movie", page))
+    return ok(data) if data else err("Gagal mengambil movies samehadaku")
+
+@app.route("/shk/anime/popular")
+def shk_popular():
+    page = request.args.get("page", 1, type=int)
+    data = _cached(f"shk_popular_{page}", "popular", lambda: _shk_do_list("popular", page))
+    return ok(data) if data else err("Gagal mengambil popular samehadaku")
+
+@app.route("/shk/anime/search")
+def shk_search():
+    q    = request.args.get("q", "").strip()
+    page = request.args.get("page", 1, type=int)
+    if not q: return err("Parameter 'q' diperlukan", 400)
+    data = _shk_do_search(q, page)
+    return ok(data) if data else err("Gagal search samehadaku")
+
+@app.route("/shk/anime/detail/<slug>")
+def shk_detail(slug):
+    data = _cached(f"shk_detail_{slug}", "detail", lambda: _shk_do_detail(slug))
+    return ok(data) if data else err(f"Anime '{slug}' tidak ditemukan", 404)
+
+@app.route("/shk/anime/episode/<path:slug>")
+def shk_episode(slug):
+    data = _cached(f"shk_ep_{slug}", "episode", lambda: _shk_do_episode(slug))
+    return ok(data) if data else err(f"Episode '{slug}' tidak ditemukan", 404)
+
+@app.route("/shk/anime/genres")
+def shk_genres():
+    data = _cached("shk_genres", "genres", _shk_do_genres)
+    return ok(data) if data else err("Gagal mengambil genre samehadaku")
+
+@app.route("/shk/anime/schedule")
+def shk_schedule():
+    data = _cached("shk_schedule", "schedule", _shk_do_schedule)
+    return ok(data) if data else err("Gagal mengambil jadwal samehadaku")
 
 @app.route("/health")
 def health():
