@@ -356,7 +356,7 @@ def _shk_get_cards(soup):
         if len(cards) >= 3: return cards
     return []
 
-def _shk_shk_parse_card(card):
+def _shk_parse_card(card):
     data = {}
     el = card.select_one("h2, h3, .tt, .ntitle, a[title]")
     if el:
@@ -387,7 +387,7 @@ def _shk_pagination(soup):
         except: pass
     return pag
 
-def _shk_shk_do_schedule_raw(soup):
+def _shk_do_schedule_raw(soup):
     schedule = {}
     days_map = {
         "sunday":"Minggu","monday":"Senin","tuesday":"Selasa",
@@ -413,10 +413,16 @@ def _shk_do_home():
     return {"animeList": [r for r in [_shk_parse_card(c) for c in cards] if r.get("title")]}
 
 def _shk_do_list(status, page):
-    url_map = {"movie": f"/anime/?type=movie&page={page}", "popular": f"/anime/?order=popular&page={page}"}
-    soup = _get(url_map.get(status, f"/anime/?status={status}&page={page}"))
+    url_map = {
+        "movie":   f"/anime/?type=movie&page={page}",
+        "popular": f"/anime/?order=popular&page={page}",
+    }
+    url = url_map.get(status, f"/anime/?status={status}&page={page}")
+    soup = _get_shk(url)
     if not soup: return None
-    return {"animeList": [_shk_parse_card(c) for c in _shk_get_cards(soup)], "pagination": _shk_pagination(soup)}
+    cards = _shk_get_cards(soup)
+    result = [r for r in [_shk_parse_card(c) for c in cards] if r.get("title")]
+    return {"animeList": result, "pagination": _shk_pagination(soup)}
 
 def _shk_do_search(query, page):
     soup = _get_shk(f"/page/{page}/?s={query}" if page > 1 else f"/?s={query}")
