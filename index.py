@@ -620,8 +620,8 @@ ENDPOINTS_DOCS = [
                     }
                 ],
                 "pagination": {
-                    "hasNextPage": true,
-                    "hasPrevPage": false,
+                    "hasNextPage": True,
+                    "hasPrevPage": False,
                     "currentPage": 1
                 }
             }
@@ -644,8 +644,8 @@ ENDPOINTS_DOCS = [
                     }
                 ],
                 "pagination": {
-                    "hasNextPage": true,
-                    "hasPrevPage": false,
+                    "hasNextPage": True,
+                    "hasPrevPage": False,
                     "currentPage": 1
                 }
             }
@@ -668,8 +668,8 @@ ENDPOINTS_DOCS = [
                     }
                 ],
                 "pagination": {
-                    "hasNextPage": true,
-                    "hasPrevPage": false,
+                    "hasNextPage": True,
+                    "hasPrevPage": False,
                     "currentPage": 1
                 }
             }
@@ -692,8 +692,8 @@ ENDPOINTS_DOCS = [
                     }
                 ],
                 "pagination": {
-                    "hasNextPage": true,
-                    "hasPrevPage": false,
+                    "hasNextPage": True,
+                    "hasPrevPage": False,
                     "currentPage": 1
                 }
             }
@@ -726,8 +726,8 @@ ENDPOINTS_DOCS = [
                     }
                 ],
                 "pagination": {
-                    "hasNextPage": false,
-                    "hasPrevPage": false,
+                    "hasNextPage": False,
+                    "hasPrevPage": False,
                     "currentPage": 1
                 }
             }
@@ -788,7 +788,7 @@ ENDPOINTS_DOCS = [
                 "animeId": "ikoku-nikki",
                 "episodeNum": "9",
                 "prevEpisode": "ikoku-nikki-episode-8",
-                "nextEpisode": null,
+                "nextEpisode": None,
                 "defaultEmbed": "https://www.blogger.com/video.g?token=AD6v5dx...",
                 "servers": [
                     {
