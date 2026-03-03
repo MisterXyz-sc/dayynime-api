@@ -180,31 +180,65 @@ def _get_shk(path_or_url, retries=4):
             print(f"[shk] attempt {i+1} error: {e}")
     return None
 
-def _get_otk(path_or_url, retries=4):
-    """CF bypass multi-strategy khusus otakudesu (Animestream theme)."""
+def _get_otk(path_or_url, retries=6):
+    """CF bypass agresif untuk otakudesu.best (Animestream + Cloudflare)."""
+    import requests as _req
     url = path_or_url if path_or_url.startswith("http") else BASE_OTK + path_or_url
+
+    # Berbagai kombinasi browser + UA yang sering lolos CF
     strategies = [
-        {"browser": {"browser": "chrome",  "platform": "windows", "mobile": False}},
-        {"browser": {"browser": "chrome",  "platform": "linux",   "mobile": False}},
-        {"browser": {"browser": "firefox", "platform": "windows", "mobile": False}},
-        {"browser": {"browser": "chrome",  "platform": "android", "mobile": True}},
+        # cloudscraper strategies
+        ("cs", {"browser": {"browser": "chrome",  "platform": "windows", "mobile": False},
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}),
+        ("cs", {"browser": {"browser": "chrome",  "platform": "linux",   "mobile": False},
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}),
+        ("cs", {"browser": {"browser": "firefox", "platform": "windows", "mobile": False},
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0"}),
+        ("cs", {"browser": {"browser": "chrome",  "platform": "android", "mobile": True},
+                "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36"}),
+        # requests biasa fallback
+        ("req", {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}),
+        ("req", {"User-Agent": "Googlebot/2.1 (+http://www.google.com/bot.html)"}),
     ]
+
     headers_base = {
-        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8",
+        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection":      "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest":  "document",
+        "Sec-Fetch-Mode":  "navigate",
+        "Sec-Fetch-Site":  "none",
         "Referer":         BASE_OTK + "/",
     }
-    for i in range(retries):
+
+    for i in range(min(retries, len(strategies))):
+        mode, cfg = strategies[i]
         try:
-            if i > 0: time.sleep(i * 1.5)
-            s = cloudscraper.create_scraper(**strategies[i % len(strategies)])
-            ua = ("Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36"
-                  if i == 3 else
-                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
-            s.headers.update({**headers_base, "User-Agent": ua})
-            r = s.get(url, timeout=20)
+            if i > 0: time.sleep(i * 1.0)
+            headers = {**headers_base, "User-Agent": cfg["User-Agent"]}
+
+            if mode == "cs":
+                browser_cfg = {k: v for k, v in cfg.items() if k != "User-Agent"}
+                s = cloudscraper.create_scraper(**browser_cfg)
+                s.headers.update(headers)
+                r = s.get(url, timeout=15, allow_redirects=True)
+            else:
+                sess = _req.Session()
+                sess.headers.update(headers)
+                r = sess.get(url, timeout=15, allow_redirects=True)
+
+            print(f"[otk] attempt {i+1} ({mode}) → {r.status_code} | {len(r.content)} bytes")
+
             if r.status_code == 200:
+                if "challenge" in r.text[:500].lower() or "just a moment" in r.text[:500].lower():
+                    print(f"[otk] attempt {i+1} → CF challenge, retry...")
+                    continue
                 return BeautifulSoup(r.text, "html.parser")
+            elif r.status_code in (403, 503, 429):
+                print(f"[otk] attempt {i+1} → blocked ({r.status_code}), retry...")
+                time.sleep(2)
         except Exception as e:
             print(f"[otk] attempt {i+1} error: {e}")
     return None
