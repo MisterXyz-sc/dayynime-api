@@ -181,31 +181,27 @@ def _get_shk(path_or_url, retries=4):
     return None
 
 def _get_otk(path_or_url, retries=6):
-    """CF bypass agresif untuk otakudesu.best (Animestream + Cloudflare)."""
+    """Multi-strategy Cloudflare bypass untuk otakudesu.best"""
     import requests as _req
     url = path_or_url if path_or_url.startswith("http") else BASE_OTK + path_or_url
 
-    # Berbagai kombinasi browser + UA yang sering lolos CF
     strategies = [
-        # cloudscraper strategies
-        ("cs", {"browser": {"browser": "chrome",  "platform": "windows", "mobile": False},
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}),
-        ("cs", {"browser": {"browser": "chrome",  "platform": "linux",   "mobile": False},
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}),
-        ("cs", {"browser": {"browser": "firefox", "platform": "windows", "mobile": False},
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0"}),
-        ("cs", {"browser": {"browser": "chrome",  "platform": "android", "mobile": True},
-                "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36"}),
-        # requests biasa fallback
-        ("req", {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}),
-        ("req", {"User-Agent": "Googlebot/2.1 (+http://www.google.com/bot.html)"}),
+        ("cs", {"browser":{"browser":"chrome", "platform":"windows","mobile":False},
+                "ua":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}),
+        ("cs", {"browser":{"browser":"chrome", "platform":"linux",  "mobile":False},
+                "ua":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}),
+        ("cs", {"browser":{"browser":"firefox","platform":"windows","mobile":False},
+                "ua":"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0"}),
+        ("cs", {"browser":{"browser":"chrome", "platform":"android","mobile":True},
+                "ua":"Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36"}),
+        ("req",{"ua":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}),
+        ("req",{"ua":"Googlebot/2.1 (+http://www.google.com/bot.html)"}),
     ]
 
     headers_base = {
         "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8",
         "Accept-Encoding": "gzip, deflate, br",
-        "Connection":      "keep-alive",
         "Upgrade-Insecure-Requests": "1",
         "Sec-Fetch-Dest":  "document",
         "Sec-Fetch-Mode":  "navigate",
@@ -217,11 +213,9 @@ def _get_otk(path_or_url, retries=6):
         mode, cfg = strategies[i]
         try:
             if i > 0: time.sleep(i * 1.0)
-            headers = {**headers_base, "User-Agent": cfg["User-Agent"]}
-
+            headers = {**headers_base, "User-Agent": cfg["ua"]}
             if mode == "cs":
-                browser_cfg = {k: v for k, v in cfg.items() if k != "User-Agent"}
-                s = cloudscraper.create_scraper(**browser_cfg)
+                s = cloudscraper.create_scraper(browser=cfg["browser"])
                 s.headers.update(headers)
                 r = s.get(url, timeout=15, allow_redirects=True)
             else:
@@ -229,32 +223,20 @@ def _get_otk(path_or_url, retries=6):
                 sess.headers.update(headers)
                 r = sess.get(url, timeout=15, allow_redirects=True)
 
-            print(f"[otk] attempt {i+1} ({mode}) → {r.status_code} | {len(r.content)} bytes")
+            print(f"[otk] {i+1}/{retries} ({mode}) -> {r.status_code} | {len(r.content)}b")
 
             if r.status_code == 200:
-                if "challenge" in r.text[:500].lower() or "just a moment" in r.text[:500].lower():
-                    print(f"[otk] attempt {i+1} → CF challenge, retry...")
+                txt_low = r.text[:500].lower()
+                if "just a moment" in txt_low or ("challenge" in txt_low and "cf-" in r.text[:1000]):
+                    print(f"[otk] attempt {i+1} -> CF challenge page, retry...")
                     continue
                 return BeautifulSoup(r.text, "html.parser")
             elif r.status_code in (403, 503, 429):
-                print(f"[otk] attempt {i+1} → blocked ({r.status_code}), retry...")
+                print(f"[otk] attempt {i+1} -> {r.status_code}, retry...")
                 time.sleep(2)
         except Exception as e:
             print(f"[otk] attempt {i+1} error: {e}")
     return None
-
-# ══════════════════════════════════════════════════════
-# OTAKUDESU SCRAPER FUNCTIONS
-# Theme   : Animestream (WordPress 5.6.16)
-# Domain  : otakudesu.best
-# Cards   : .detpost
-# Paginate: /page/{n}/
-# Episodes: .episodelist li
-# Servers : SELECT + base64 decode
-# Search  : /?s={query}
-# Schedule: /jadwal-rilis/ (.venz structure)
-# Genres  : /genre-list/ → /genres/{slug}/
-# ══════════════════════════════════════════════════════
 
 def _otk_get_cards(soup):
     return soup.select(".detpost")
