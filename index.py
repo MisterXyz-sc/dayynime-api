@@ -1913,29 +1913,7 @@ pre::-webkit-scrollbar-thumb{background:rgba(255,77,26,0.3);border-radius:99px}
     </a>
   </div>
 
-  <!-- Stats -->
-  <div class="stats-row">
-    <div class="stat-item">
-      <span class="stat-val orange">{{ endpoints|length }}</span>
-      <span class="stat-key">Endpoints</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-val">3</span>
-      <span class="stat-key">Sources</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-val blue">Flask</span>
-      <span class="stat-key">Framework</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-val green">JSON</span>
-      <span class="stat-key">Format</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-val orange">70/m</span>
-      <span class="stat-key">Rate Limit</span>
-    </div>
-  </div>
+
 </div>
 
 <!-- MAIN -->
