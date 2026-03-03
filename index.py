@@ -1477,151 +1477,522 @@ HTML = '''<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dayynime API</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0f1923;--bg2:#152030;--bg3:#1a2840;--card:#162035;--card2:#1e2d45;
-  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
-  --accent:#e8501a;--accent2:#ff6b35;--blue:#38bdf8;--green:#4ade80;
-  --text:#e2eaf4;--text2:#8ba0b8;--text3:#4d6278;
-  --sans:'Plus Jakarta Sans',sans-serif;--mono:'Fira Code',monospace;
+  --bg:#080c10;--bg2:#0d1219;--bg3:#111820;--card:#0f1720;--card2:#162030;
+  --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.1);
+  --accent:#ff4d1a;--accent2:#ff6b35;--accent3:#ff8c5a;
+  --blue:#22d3ee;--green:#34d399;--gold:#fbbf24;--purple:#a78bfa;
+  --text:#dce8f4;--text2:#7a95b0;--text3:#3d5570;
+  --syne:'Syne',sans-serif;--mono:'Space Mono',monospace;--inter:'Inter',sans-serif;
+  --glow-orange:0 0 40px rgba(255,77,26,0.25);
+  --glow-blue:0 0 40px rgba(34,211,238,0.15);
 }
 html{scroll-behavior:smooth}
-body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;line-height:1.6}
-.header{background:linear-gradient(180deg,var(--bg2) 0%,var(--bg) 100%);border-bottom:1px solid var(--border);padding:48px 24px 40px;text-align:center;position:relative;overflow:hidden}
-.header::before{content:'';position:absolute;top:-60px;left:50%;transform:translateX(-50%);width:600px;height:300px;background:radial-gradient(ellipse,rgba(232,80,26,0.12) 0%,transparent 70%);pointer-events:none}
-.header-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(232,80,26,0.12);border:1px solid rgba(232,80,26,0.25);border-radius:99px;padding:4px 14px;font-family:var(--mono);font-size:11px;color:var(--accent2);margin-bottom:20px;letter-spacing:0.5px}
-.badge-dot{width:6px;height:6px;border-radius:50%;background:var(--accent2);animation:blink 1.5s ease-in-out infinite}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
-.header-logo{font-size:clamp(28px,6vw,44px);font-weight:800;letter-spacing:-1px;margin-bottom:10px}
-.header-logo .d{color:var(--accent)}
-.header-logo .api{font-family:var(--mono);font-size:0.55em;font-weight:500;color:var(--text2);vertical-align:middle;margin-left:4px;background:var(--bg3);border:1px solid var(--border2);padding:2px 10px;border-radius:6px;letter-spacing:2px}
-.header-desc{color:var(--text2);font-size:15px;max-width:480px;margin:0 auto 28px}
-.base-url{display:inline-flex;align-items:center;gap:12px;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:10px 20px;font-family:var(--mono);font-size:13px}
-.base-url-label{color:var(--text3);font-size:10px;letter-spacing:2px;text-transform:uppercase}
-.base-url-val{color:var(--blue)}
-.header-stats{display:flex;justify-content:center;gap:32px;margin-top:24px;flex-wrap:wrap}
-.stat{font-size:13px;color:var(--text3)}
-.stat strong{color:var(--text);font-weight:700;margin-right:4px}
-.main{max-width:780px;margin:0 auto;padding:32px 20px 80px}
-.section-header{display:flex;align-items:center;gap:12px;margin-bottom:20px}
-.section-icon{font-size:22px}
-.section-title{font-size:20px;font-weight:800;color:var(--text)}
-.section-line{flex:1;height:2px;background:linear-gradient(to right,var(--accent),transparent)}
-.section-header.shk .section-line{background:linear-gradient(to right,var(--blue),transparent)}
-.section-header.shk .section-title{color:var(--blue)}
-.ep-card.shk{border-left-color:var(--blue)}
-.ep-card.shk:hover{border-color:rgba(56,189,248,0.4)}
-.ep-card.shk .method-pill{background:rgba(56,189,248,0.1);color:var(--blue);border-color:rgba(56,189,248,0.2)}
-.section-header.otk .section-line{background:linear-gradient(to right,#f59e0b,transparent)}
-.section-header.otk .section-title{color:#f59e0b}
-.ep-card.otk{border-left-color:#f59e0b}
-.ep-card.otk:hover{border-color:rgba(245,158,11,0.4)}
-.ep-card.otk .method-pill{background:rgba(245,158,11,0.1);color:#f59e0b;border-color:rgba(245,158,11,0.2)}
-.section-gap{margin-top:36px}
-.ep-card{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;margin-bottom:14px;overflow:hidden;transition:border-color 0.2s,box-shadow 0.2s}
-.ep-card:hover{border-color:rgba(232,80,26,0.4);box-shadow:0 4px 24px rgba(0,0,0,0.3)}
-.ep-header{display:flex;align-items:center;gap:12px;padding:16px 20px;cursor:pointer;user-select:none}
-.ep-header:hover{background:rgba(255,255,255,0.02)}
-.method-pill{font-family:var(--mono);font-size:10px;font-weight:600;padding:3px 10px;border-radius:6px;flex-shrink:0;letter-spacing:1px;background:rgba(74,222,128,0.1);color:var(--green);border:1px solid rgba(74,222,128,0.2)}
-.ep-title{font-size:15px;font-weight:700;color:var(--text);flex:1}
-.chevron{width:18px;height:18px;color:var(--text3);transition:transform 0.25s cubic-bezier(.34,1.56,.64,1);flex-shrink:0}
-.ep-card.open .chevron{transform:rotate(180deg)}
-.path-box{margin:0 20px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:11px 16px;font-family:var(--mono);font-size:13px;color:var(--text2);display:flex;align-items:center;gap:10px}
-.path-method{color:var(--green);font-weight:600;margin-right:2px}
-.path-static{color:var(--text2)}
-.path-param{color:var(--accent2)}
-.ep-body{display:none;padding:14px 20px 20px}
+
+/* ─── SCROLLBAR ─── */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:rgba(255,77,26,0.4);border-radius:99px}
+
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--inter);
+  min-height:100vh;
+  line-height:1.6;
+  overflow-x:hidden;
+}
+
+/* ─── NOISE TEXTURE ─── */
+body::before{
+  content:'';
+  position:fixed;inset:0;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events:none;z-index:0;opacity:0.6;
+}
+
+/* ─── ANIMATED GRID BG ─── */
+.grid-bg{
+  position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:
+    linear-gradient(rgba(255,77,26,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,77,26,0.03) 1px, transparent 1px);
+  background-size:48px 48px;
+  mask-image:radial-gradient(ellipse 80% 60% at 50% 0%, black 30%, transparent 100%);
+}
+
+/* ─── HEADER ─── */
+.header{
+  position:relative;z-index:1;
+  padding:60px 24px 52px;
+  text-align:center;
+  background:linear-gradient(180deg,rgba(255,77,26,0.04) 0%,transparent 100%);
+  border-bottom:1px solid var(--border);
+  overflow:hidden;
+}
+.header::after{
+  content:'';position:absolute;
+  top:-120px;left:50%;transform:translateX(-50%);
+  width:700px;height:400px;
+  background:radial-gradient(ellipse,rgba(255,77,26,0.1) 0%,transparent 65%);
+  pointer-events:none;
+}
+
+/* ─── STATUS BADGE ─── */
+.status-badge{
+  display:inline-flex;align-items:center;gap:8px;
+  background:rgba(52,211,153,0.08);
+  border:1px solid rgba(52,211,153,0.2);
+  border-radius:99px;padding:6px 16px 6px 12px;
+  font-family:var(--mono);font-size:11px;
+  color:var(--green);margin-bottom:28px;letter-spacing:0.8px;
+  text-transform:uppercase;
+}
+.badge-pulse{
+  width:8px;height:8px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 0 0 rgba(52,211,153,0.4);
+  animation:pulse 2s ease-in-out infinite;
+}
+@keyframes pulse{
+  0%{box-shadow:0 0 0 0 rgba(52,211,153,0.4)}
+  50%{box-shadow:0 0 0 6px rgba(52,211,153,0)}
+  100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}
+}
+
+/* ─── LOGO ─── */
+.logo{
+  font-family:var(--syne);
+  font-size:clamp(36px,8vw,62px);
+  font-weight:800;
+  letter-spacing:-2px;
+  line-height:1;
+  margin-bottom:6px;
+  position:relative;z-index:1;
+}
+.logo-d{
+  color:var(--accent);
+  text-shadow:0 0 30px rgba(255,77,26,0.5);
+}
+.logo-rest{color:var(--text)}
+.logo-tag{
+  display:inline-block;
+  font-family:var(--mono);font-size:clamp(11px,2vw,15px);
+  font-weight:400;color:var(--text3);
+  background:var(--bg3);border:1px solid var(--border2);
+  padding:3px 12px;border-radius:6px;
+  vertical-align:middle;margin-left:8px;
+  letter-spacing:3px;
+}
+
+.tagline{
+  color:var(--text2);font-size:15px;
+  max-width:460px;margin:14px auto 32px;
+  font-weight:400;
+}
+
+/* ─── BASE URL BAR ─── */
+.base-url-bar{
+  display:inline-flex;align-items:center;gap:0;
+  background:var(--bg3);
+  border:1px solid var(--border2);
+  border-radius:12px;overflow:hidden;
+  font-family:var(--mono);font-size:13px;
+  box-shadow:var(--glow-orange);
+}
+.base-url-label{
+  background:rgba(255,77,26,0.15);
+  border-right:1px solid var(--border2);
+  padding:11px 16px;
+  font-size:9px;letter-spacing:2.5px;
+  color:var(--accent3);text-transform:uppercase;
+  white-space:nowrap;
+}
+.base-url-val{color:var(--blue);padding:11px 20px}
+
+/* ─── ACTION BUTTONS ─── */
+.action-btns{
+  display:flex;justify-content:center;flex-wrap:wrap;
+  gap:12px;margin-top:28px;
+}
+.btn{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:11px 22px;border-radius:10px;
+  font-family:var(--syne);font-size:13px;font-weight:700;
+  text-decoration:none;cursor:pointer;border:none;
+  transition:all 0.2s cubic-bezier(.34,1.56,.64,1);
+  letter-spacing:0.3px;
+  position:relative;overflow:hidden;
+}
+.btn::before{
+  content:'';position:absolute;inset:0;
+  background:rgba(255,255,255,0);
+  transition:background 0.2s;
+}
+.btn:hover::before{background:rgba(255,255,255,0.06)}
+.btn:active{transform:scale(0.97)}
+.btn-primary{
+  background:linear-gradient(135deg,var(--accent),#c93800);
+  color:#fff;
+  box-shadow:0 4px 20px rgba(255,77,26,0.35),0 1px 0 rgba(255,255,255,0.1) inset;
+}
+.btn-primary:hover{
+  transform:translateY(-2px);
+  box-shadow:0 8px 28px rgba(255,77,26,0.45),0 1px 0 rgba(255,255,255,0.1) inset;
+}
+.btn-secondary{
+  background:rgba(251,191,36,0.1);
+  border:1px solid rgba(251,191,36,0.25);
+  color:var(--gold);
+}
+.btn-secondary:hover{
+  transform:translateY(-2px);
+  background:rgba(251,191,36,0.15);
+  box-shadow:0 6px 20px rgba(251,191,36,0.2);
+}
+.btn-icon{font-size:16px}
+
+/* ─── STATS ROW ─── */
+.stats-row{
+  display:flex;justify-content:center;
+  flex-wrap:wrap;gap:0;
+  margin-top:36px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  overflow:hidden;
+  max-width:720px;
+  margin-left:auto;margin-right:auto;
+  background:var(--bg2);
+}
+.stat-item{
+  flex:1;min-width:120px;
+  padding:18px 16px;
+  text-align:center;
+  border-right:1px solid var(--border);
+  position:relative;
+}
+.stat-item:last-child{border-right:none}
+.stat-val{
+  font-family:var(--syne);font-size:18px;font-weight:800;
+  color:var(--text);display:block;line-height:1;margin-bottom:6px;
+}
+.stat-val.orange{color:var(--accent2)}
+.stat-val.blue{color:var(--blue)}
+.stat-val.green{color:var(--green)}
+.stat-key{
+  font-size:10px;letter-spacing:1.5px;text-transform:uppercase;
+  color:var(--text3);font-family:var(--mono);
+}
+
+/* ─── MAIN CONTENT ─── */
+.main{max-width:820px;margin:0 auto;padding:40px 20px 100px;position:relative;z-index:1}
+
+/* ─── RATE LIMIT BOX ─── */
+.rl-box{
+  background:linear-gradient(135deg,rgba(220,38,38,0.06) 0%,rgba(220,38,38,0.02) 100%);
+  border:1px solid rgba(239,68,68,0.25);
+  border-left:3px solid #ef4444;
+  border-radius:14px;padding:24px 26px;
+  margin-bottom:36px;
+  position:relative;overflow:hidden;
+}
+.rl-box::before{
+  content:'';position:absolute;
+  top:-40px;right:-40px;width:150px;height:150px;
+  background:radial-gradient(circle,rgba(239,68,68,0.08),transparent 70%);
+  pointer-events:none;
+}
+.rl-header{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+.rl-title{font-family:var(--syne);font-size:16px;font-weight:800;color:#f87171;letter-spacing:0.3px}
+.rl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.rl-item{
+  background:rgba(239,68,68,0.06);
+  border:1px solid rgba(239,68,68,0.12);
+  border-radius:10px;padding:12px 14px;
+}
+.rl-item-key{font-family:var(--mono);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);margin-bottom:4px}
+.rl-item-val{font-size:14px;color:var(--text);font-weight:600}
+.rl-item-val em{color:#f87171;font-style:normal}
+.rl-divider{height:1px;background:rgba(239,68,68,0.15);margin:16px 0}
+.rl-notes{display:flex;flex-direction:column;gap:6px}
+.rl-note{font-size:13px;color:var(--text2);display:flex;align-items:flex-start;gap:8px}
+.rl-roast{
+  margin-top:14px;padding:12px 16px;
+  background:rgba(239,68,68,0.08);
+  border:1px solid rgba(239,68,68,0.15);
+  border-radius:10px;
+  font-family:var(--mono);font-size:12px;font-weight:700;
+  color:#fca5a5;text-align:center;letter-spacing:0.5px;
+}
+@media(max-width:520px){.rl-grid{grid-template-columns:1fr}}
+
+/* ─── SECTION HEADER ─── */
+.section-head{
+  display:flex;align-items:center;gap:14px;
+  margin:40px 0 18px;
+}
+.section-head-icon{
+  width:36px;height:36px;border-radius:10px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;flex-shrink:0;
+}
+.section-head-icon.orange{background:rgba(255,77,26,0.12);box-shadow:0 0 0 1px rgba(255,77,26,0.2)}
+.section-head-icon.blue{background:rgba(34,211,238,0.1);box-shadow:0 0 0 1px rgba(34,211,238,0.2)}
+.section-head-icon.gold{background:rgba(251,191,36,0.1);box-shadow:0 0 0 1px rgba(251,191,36,0.2)}
+.section-head-title{font-family:var(--syne);font-size:19px;font-weight:800}
+.section-head-title.orange{color:var(--accent2)}
+.section-head-title.blue{color:var(--blue)}
+.section-head-title.gold{color:var(--gold)}
+.section-head-line{flex:1;height:1px}
+.section-head-line.orange{background:linear-gradient(to right,rgba(255,77,26,0.4),transparent)}
+.section-head-line.blue{background:linear-gradient(to right,rgba(34,211,238,0.3),transparent)}
+.section-head-line.gold{background:linear-gradient(to right,rgba(251,191,36,0.3),transparent)}
+.section-head-count{
+  font-family:var(--mono);font-size:11px;
+  padding:3px 10px;border-radius:99px;
+  font-weight:700;flex-shrink:0;
+}
+.section-head-count.orange{background:rgba(255,77,26,0.1);color:var(--accent2);border:1px solid rgba(255,77,26,0.2)}
+.section-head-count.blue{background:rgba(34,211,238,0.08);color:var(--blue);border:1px solid rgba(34,211,238,0.15)}
+.section-head-count.gold{background:rgba(251,191,36,0.08);color:var(--gold);border:1px solid rgba(251,191,36,0.15)}
+
+/* ─── ENDPOINT CARD ─── */
+.ep-card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:14px;
+  margin-bottom:10px;
+  overflow:hidden;
+  transition:box-shadow 0.25s,border-color 0.25s,transform 0.15s;
+}
+.ep-card:hover{transform:translateY(-1px)}
+.ep-card.orange{border-left:2px solid rgba(255,77,26,0.5)}
+.ep-card.orange:hover{border-color:rgba(255,77,26,0.35);box-shadow:0 6px 30px rgba(0,0,0,0.4),0 0 0 1px rgba(255,77,26,0.08)}
+.ep-card.blue{border-left:2px solid rgba(34,211,238,0.4)}
+.ep-card.blue:hover{border-color:rgba(34,211,238,0.25);box-shadow:0 6px 30px rgba(0,0,0,0.4),0 0 0 1px rgba(34,211,238,0.06)}
+.ep-card.gold{border-left:2px solid rgba(251,191,36,0.4)}
+.ep-card.gold:hover{border-color:rgba(251,191,36,0.25);box-shadow:0 6px 30px rgba(0,0,0,0.4),0 0 0 1px rgba(251,191,36,0.06)}
+
+.ep-header{
+  display:flex;align-items:center;gap:12px;
+  padding:15px 18px;cursor:pointer;user-select:none;
+}
+.ep-header:hover{background:rgba(255,255,255,0.015)}
+
+.get-badge{
+  font-family:var(--mono);font-size:9px;font-weight:700;
+  padding:4px 9px;border-radius:6px;
+  letter-spacing:1.5px;flex-shrink:0;
+  text-transform:uppercase;
+}
+.get-badge.orange{background:rgba(255,107,53,0.12);color:var(--accent2);border:1px solid rgba(255,107,53,0.2)}
+.get-badge.blue{background:rgba(34,211,238,0.08);color:var(--blue);border:1px solid rgba(34,211,238,0.15)}
+.get-badge.gold{background:rgba(251,191,36,0.08);color:var(--gold);border:1px solid rgba(251,191,36,0.15)}
+
+.ep-name{flex:1;font-size:14px;font-weight:600;color:var(--text);font-family:var(--inter)}
+.ep-chevron{
+  width:16px;height:16px;color:var(--text3);flex-shrink:0;
+  transition:transform 0.3s cubic-bezier(.34,1.56,.64,1);
+}
+.ep-card.open .ep-chevron{transform:rotate(180deg)}
+
+.ep-path{
+  margin:0 18px;
+  background:rgba(0,0,0,0.35);
+  border:1px solid var(--border);
+  border-radius:8px;padding:10px 14px;
+  font-family:var(--mono);font-size:12px;
+  display:flex;align-items:center;gap:8px;
+}
+.ep-path-method{font-weight:700;margin-right:2px}
+.ep-path-method.orange{color:var(--accent2)}
+.ep-path-method.blue{color:var(--blue)}
+.ep-path-method.gold{color:var(--gold)}
+.ep-path-static{color:var(--text2)}
+.ep-path-param{color:var(--purple)}
+
+.ep-body{display:none;padding:14px 18px 20px}
 .ep-card.open .ep-body{display:block}
-.ep-desc{font-size:13px;color:var(--text2);margin-bottom:6px;line-height:1.65}
-.ep-example{font-size:12px;color:var(--text3);font-family:var(--mono);margin-bottom:16px}
-.ep-example span{color:var(--accent2)}
-.json-label-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
-.json-label-text{font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text3)}
-.copy-btn{font-family:var(--mono);font-size:10px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:4px 12px;cursor:pointer;transition:all 0.15s}
-.copy-btn:hover{background:var(--card2);color:var(--text)}
-.copy-btn.ok{color:var(--green);border-color:rgba(74,222,128,0.3)}
-.json-wrap{background:var(--bg);border:1px solid var(--border);border-radius:10px;overflow:hidden}
-.json-bar{background:var(--bg3);border-bottom:1px solid var(--border);padding:8px 14px;display:flex;align-items:center;gap:6px}
+.ep-desc{font-size:13px;color:var(--text2);margin-bottom:8px;line-height:1.7}
+.ep-example{
+  font-family:var(--mono);font-size:11px;
+  color:var(--text3);margin-bottom:16px;
+  display:flex;align-items:center;gap:8px;
+}
+.ep-example span{color:var(--purple)}
+
+.json-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.json-toolbar-label{font-family:var(--mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text3)}
+.copy-btn{
+  font-family:var(--mono);font-size:10px;
+  background:var(--bg3);border:1px solid var(--border2);
+  color:var(--text2);border-radius:6px;padding:5px 14px;
+  cursor:pointer;transition:all 0.15s;
+}
+.copy-btn:hover{background:var(--card2);color:var(--text);border-color:var(--border2)}
+.copy-btn.ok{color:var(--green);border-color:rgba(52,211,153,0.3)}
+
+.json-wrap{background:rgba(0,0,0,0.4);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.json-bar{
+  background:rgba(255,255,255,0.02);
+  border-bottom:1px solid var(--border);
+  padding:8px 14px;display:flex;align-items:center;gap:6px;
+}
 .dot{width:10px;height:10px;border-radius:50%}
 .dot-r{background:#ff5f57}.dot-y{background:#febc2e}.dot-g{background:#28c840}
-pre{font-family:var(--mono);font-size:12px;line-height:1.75;padding:16px;overflow-x:auto;color:var(--text)}
+pre{
+  font-family:var(--mono);font-size:11.5px;
+  line-height:1.8;padding:16px;
+  overflow-x:auto;color:var(--text);
+}
 pre::-webkit-scrollbar{height:3px}
-pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
-.jk{color:#7dd3fc}.js{color:#86efac}.jn{color:#fbbf24}.jb{color:#f472b6}.jl{color:#94a3b8}
-.rl-box{background:rgba(220,38,38,0.07);border:1px solid rgba(220,38,38,0.35);border-left:4px solid #ef4444;border-radius:12px;padding:22px 24px;margin-bottom:28px}
-.rl-box-title{font-size:17px;font-weight:900;color:#f87171;margin-bottom:16px;letter-spacing:0.5px}
-.rl-row{display:flex;gap:10px;margin-bottom:10px;font-size:14px;line-height:1.6}
-.rl-key{color:var(--text3);font-family:var(--mono);font-size:12px;white-space:nowrap;padding-top:2px;min-width:110px}
-.rl-val{color:var(--text)}
-.rl-val strong{color:#f87171}
-.rl-divider{height:1px;background:rgba(220,38,38,0.2);margin:14px 0}
-.rl-note{font-size:13px;color:var(--text2);margin-bottom:8px;line-height:1.6}
-.rl-roast{margin-top:14px;padding:10px 16px;background:rgba(220,38,38,0.1);border-radius:8px;font-size:13px;font-weight:700;color:#fca5a5;text-align:center;letter-spacing:0.3px}
-@media(max-width:480px){.rl-row{flex-direction:column;gap:2px}.rl-key{min-width:unset}}
-.footer{text-align:center;padding:32px 20px;border-top:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text3)}
-.footer a{color:var(--accent2);text-decoration:none}
-@media(max-width:480px){.header{padding:36px 16px 32px}.main{padding:24px 14px 60px}.ep-header{padding:14px 16px}.path-box{margin:0 16px;font-size:12px}.ep-body{padding:12px 16px 18px}}
+pre::-webkit-scrollbar-thumb{background:rgba(255,77,26,0.3);border-radius:99px}
+.jk{color:#67c9f0}.js{color:#7dd3ae}.jn{color:#fbbf24}.jb{color:#f472b6}.jl{color:#64748b}
+
+/* ─── FOOTER ─── */
+.footer{
+  position:relative;z-index:1;
+  border-top:1px solid var(--border);
+  padding:36px 24px;
+  text-align:center;
+}
+.footer-links{
+  display:flex;flex-wrap:wrap;justify-content:center;
+  gap:6px 20px;margin-bottom:16px;
+}
+.footer-links a{
+  font-family:var(--mono);font-size:11px;
+  color:var(--text3);text-decoration:none;
+  transition:color 0.15s;
+}
+.footer-links a:hover{color:var(--accent2)}
+.footer-copy{
+  font-family:var(--mono);font-size:10px;color:var(--text3);
+  letter-spacing:0.5px;
+}
+.footer-copy span{color:var(--accent)}
+
+/* ─── RESPONSIVE ─── */
+@media(max-width:540px){
+  .header{padding:48px 16px 44px}
+  .main{padding:28px 14px 80px}
+  .ep-header{padding:13px 14px}
+  .ep-path{margin:0 14px;font-size:11px}
+  .ep-body{padding:12px 14px 16px}
+  .stat-item{min-width:90px;padding:14px 10px}
+  .stats-row{margin-top:28px}
+}
 </style>
 </head>
 <body>
+<div class="grid-bg"></div>
+
+<!-- HEADER -->
 <div class="header">
-  <div class="header-badge"><span class="badge-dot"></span>API ONLINE</div>
-  <div class="header-logo"><span class="d">D</span>AYYNIME<span class="api">API</span></div>
-  <p class="header-desc">REST API scraper untuk streaming anime sub Indo. Data diambil langsung dari sumber dengan sistem cache.</p>
-  <div class="base-url">
+  <div class="status-badge">
+    <span class="badge-pulse"></span>API ONLINE
+  </div>
+  <div class="logo">
+    <span class="logo-d">D</span><span class="logo-rest">AYYNIME</span><span class="logo-tag">API</span>
+  </div>
+  <p class="tagline">REST API scraper untuk streaming anime sub Indo. Data diambil langsung dari sumber dengan sistem cache pintar.</p>
+  <div class="base-url-bar">
     <span class="base-url-label">Base URL</span>
     <span class="base-url-val">https://dayynime-api.vercel.app</span>
   </div>
-  <div class="header-stats">
-    <div class="stat"><strong>{{ endpoints|length }}</strong>Endpoints</div>
-    <div class="stat"><strong>v1.animasu.app</strong>Animasu</div>
-    <div class="stat"><strong>v1.samehadaku.how</strong>Samehadaku</div>
-    <div class="stat"><strong>otakudesu.best</strong>Otakudesu</div>
-    <div class="stat"><strong>Flask</strong>Framework</div>
-    <div class="stat"><strong>JSON</strong>Format</div>
+
+  <!-- Action Buttons -->
+  <div class="action-btns">
+    <a href="https://animeku-id.vercel.app" target="_blank" class="btn btn-primary">
+      <span class="btn-icon">🎬</span> Tonton Anime
+    </a>
+    <a href="https://sociabuzz.com/dayynime/tribe" target="_blank" class="btn btn-secondary">
+      <span class="btn-icon">☕</span> Support Me
+    </a>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-item">
+      <span class="stat-val orange">{{ endpoints|length }}</span>
+      <span class="stat-key">Endpoints</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-val">3</span>
+      <span class="stat-key">Sources</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-val blue">Flask</span>
+      <span class="stat-key">Framework</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-val green">JSON</span>
+      <span class="stat-key">Format</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-val orange">70/m</span>
+      <span class="stat-key">Rate Limit</span>
+    </div>
   </div>
 </div>
+
+<!-- MAIN -->
 <div class="main">
-  <!-- Rate Limit Warning Box -->
+
+  <!-- Rate Limit Box -->
   <div class="rl-box">
-    <div class="rl-box-title">🚨 PERINGATAN RATE LIMIT</div>
-    <div class="rl-row"><span class="rl-key">Rate Limit:</span><span class="rl-val">70 permintaan per menit</span></div>
-    <div class="rl-row"><span class="rl-key">Pelanggaran:</span><span class="rl-val">Jika Anda melewati batas, Anda akan mendapatkan 3 kali peringatan sebelum <strong>BAN PERMANEN</strong></span></div>
+    <div class="rl-header">
+      <span style="font-size:20px">🚨</span>
+      <span class="rl-title">PERINGATAN RATE LIMIT</span>
+    </div>
+    <div class="rl-grid">
+      <div class="rl-item">
+        <div class="rl-item-key">Rate Limit</div>
+        <div class="rl-item-val"><em>70</em> request / menit</div>
+      </div>
+      <div class="rl-item">
+        <div class="rl-item-key">Pelanggaran</div>
+        <div class="rl-item-val">3× warning → <em>BAN</em></div>
+      </div>
+    </div>
     <div class="rl-divider"></div>
-    <div class="rl-note">⚡ Gunakan API dengan bijak dan jangan spamming!</div>
-    <div class="rl-note">🛡️ Tujuan Rate Limit: Melindungi server dari serangan Hama DDoS dan aktivitas spammer yang dapat mengganggu layanan untuk pengguna lain.</div>
+    <div class="rl-notes">
+      <div class="rl-note"><span>⚡</span> Gunakan API dengan bijak dan jangan spamming!</div>
+      <div class="rl-note"><span>🛡️</span> Rate Limit melindungi server dari serangan DDoS dan spammer yang dapat mengganggu pengguna lain.</div>
+    </div>
     <div class="rl-roast">MINIMAL TAU DIRI.. DI KASI AKSES GRATIS MALAH NGELUNJAK</div>
   </div>
 
   <!-- Animasu Endpoints -->
-  <div class="section-header">
-    <span class="section-icon">📡</span>
-    <span class="section-title">Dayynime API Endpoints</span>
-    <div class="section-line"></div>
+  <div class="section-head">
+    <div class="section-head-icon orange">📡</div>
+    <span class="section-head-title orange">Dayynime API</span>
+    <div class="section-head-line orange"></div>
+    <span class="section-head-count orange">{{ endpoints_animasu|length }} endpoints</span>
   </div>
   {% for ep in endpoints_animasu %}
-  <div class="ep-card" id="ep{{loop.index}}">
+  <div class="ep-card orange" id="ep{{loop.index}}">
     <div class="ep-header" onclick="toggle(this)">
-      <span class="method-pill">GET</span>
-      <span class="ep-title">{{ ep.title }}</span>
-      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      <span class="get-badge orange">GET</span>
+      <span class="ep-name">{{ ep.title }}</span>
+      <svg class="ep-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
     </div>
-    <div class="path-box">
-      <span class="path-method">GET</span>
+    <div class="ep-path">
+      <span class="ep-path-method orange">GET</span>
       {% set parts = ep.path.split('{') %}
       {% if parts|length > 1 %}
-        <span class="path-static">{{ parts[0] }}</span><span class="path-param">{{'{{'}}{{ parts[1] }}</span>
+        <span class="ep-path-static">{{ parts[0] }}</span><span class="ep-path-param">&#123;{{ parts[1] }}</span>
       {% else %}
-        <span class="path-static">{{ ep.path }}</span>
+        <span class="ep-path-static">{{ ep.path }}</span>
       {% endif %}
     </div>
     <div class="ep-body">
       <p class="ep-desc">{{ ep.description }}</p>
-      {% if ep.example is defined %}<p class="ep-example">📌 <span>{{ ep.example }}</span></p>{% endif %}
-      <div class="json-label-row">
-        <span class="json-label-text">Response JSON</span>
+      {% if ep.example is defined %}<p class="ep-example"><span>📌 {{ ep.example }}</span></p>{% endif %}
+      <div class="json-toolbar">
+        <span class="json-toolbar-label">Response JSON</span>
         <button class="copy-btn" onclick="copyJson(event,this,'pre{{loop.index}}')">Copy</button>
       </div>
       <div class="json-wrap">
@@ -1633,32 +2004,33 @@ pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
   {% endfor %}
 
   <!-- Samehadaku Endpoints -->
-  <div class="section-header shk section-gap">
-    <span class="section-icon">🌊</span>
-    <span class="section-title">Samehadaku API Endpoints</span>
-    <div class="section-line"></div>
+  <div class="section-head">
+    <div class="section-head-icon blue">🌊</div>
+    <span class="section-head-title blue">Samehadaku API</span>
+    <div class="section-head-line blue"></div>
+    <span class="section-head-count blue">{{ endpoints_shk|length }} endpoints</span>
   </div>
   {% for ep in endpoints_shk %}
-  <div class="ep-card shk" id="shk{{loop.index}}">
+  <div class="ep-card blue" id="shk{{loop.index}}">
     <div class="ep-header" onclick="toggle(this)">
-      <span class="method-pill">GET</span>
-      <span class="ep-title">{{ ep.title }}</span>
-      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      <span class="get-badge blue">GET</span>
+      <span class="ep-name">{{ ep.title }}</span>
+      <svg class="ep-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
     </div>
-    <div class="path-box">
-      <span class="path-method">GET</span>
+    <div class="ep-path">
+      <span class="ep-path-method blue">GET</span>
       {% set parts = ep.path.split('{') %}
       {% if parts|length > 1 %}
-        <span class="path-static">{{ parts[0] }}</span><span class="path-param">{{'{{'}}{{ parts[1] }}</span>
+        <span class="ep-path-static">{{ parts[0] }}</span><span class="ep-path-param">&#123;{{ parts[1] }}</span>
       {% else %}
-        <span class="path-static">{{ ep.path }}</span>
+        <span class="ep-path-static">{{ ep.path }}</span>
       {% endif %}
     </div>
     <div class="ep-body">
       <p class="ep-desc">{{ ep.description }}</p>
-      {% if ep.example is defined %}<p class="ep-example">📌 <span>{{ ep.example }}</span></p>{% endif %}
-      <div class="json-label-row">
-        <span class="json-label-text">Response JSON</span>
+      {% if ep.example is defined %}<p class="ep-example"><span>📌 {{ ep.example }}</span></p>{% endif %}
+      <div class="json-toolbar">
+        <span class="json-toolbar-label">Response JSON</span>
         <button class="copy-btn" onclick="copyJson(event,this,'shk_pre{{loop.index}}')">Copy</button>
       </div>
       <div class="json-wrap">
@@ -1670,32 +2042,33 @@ pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
   {% endfor %}
 
   <!-- Otakudesu Endpoints -->
-  <div class="section-header otk section-gap">
-    <span class="section-icon">🍊</span>
-    <span class="section-title">Otakudesu API Endpoints</span>
-    <div class="section-line"></div>
+  <div class="section-head">
+    <div class="section-head-icon gold">🍊</div>
+    <span class="section-head-title gold">Otakudesu API</span>
+    <div class="section-head-line gold"></div>
+    <span class="section-head-count gold">{{ endpoints_otk|length }} endpoints</span>
   </div>
   {% for ep in endpoints_otk %}
-  <div class="ep-card otk" id="otk{{loop.index}}">
+  <div class="ep-card gold" id="otk{{loop.index}}">
     <div class="ep-header" onclick="toggle(this)">
-      <span class="method-pill">GET</span>
-      <span class="ep-title">{{ ep.title }}</span>
-      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      <span class="get-badge gold">GET</span>
+      <span class="ep-name">{{ ep.title }}</span>
+      <svg class="ep-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
     </div>
-    <div class="path-box">
-      <span class="path-method">GET</span>
+    <div class="ep-path">
+      <span class="ep-path-method gold">GET</span>
       {% set parts = ep.path.split('{') %}
       {% if parts|length > 1 %}
-        <span class="path-static">{{ parts[0] }}</span><span class="path-param">{{'{{'}}{{ parts[1] }}</span>
+        <span class="ep-path-static">{{ parts[0] }}</span><span class="ep-path-param">&#123;{{ parts[1] }}</span>
       {% else %}
-        <span class="path-static">{{ ep.path }}</span>
+        <span class="ep-path-static">{{ ep.path }}</span>
       {% endif %}
     </div>
     <div class="ep-body">
       <p class="ep-desc">{{ ep.description }}</p>
-      {% if ep.example is defined %}<p class="ep-example">📌 <span>{{ ep.example }}</span></p>{% endif %}
-      <div class="json-label-row">
-        <span class="json-label-text">Response JSON</span>
+      {% if ep.example is defined %}<p class="ep-example"><span>📌 {{ ep.example }}</span></p>{% endif %}
+      <div class="json-toolbar">
+        <span class="json-toolbar-label">Response JSON</span>
         <button class="copy-btn" onclick="copyJson(event,this,'otk_pre{{loop.index}}')">Copy</button>
       </div>
       <div class="json-wrap">
@@ -1705,11 +2078,46 @@ pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
     </div>
   </div>
   {% endfor %}
+
 </div>
-<div class="footer">Dayynime API v1.0.0 &nbsp;·&nbsp; Source: <a href="https://v1.animasu.app" target="_blank">v1.animasu.app</a> &nbsp;·&nbsp; <a href="https://v1.samehadaku.how" target="_blank">v1.samehadaku.how</a> &nbsp;·&nbsp; <a href="https://otakudesu.best" target="_blank">otakudesu.best</a> &nbsp;·&nbsp; Built with Flask + cloudscraper</div>
+
+<!-- FOOTER -->
+<div class="footer">
+  <div class="footer-links">
+    <a href="https://animeku-id.vercel.app" target="_blank">🎬 Animeku</a>
+    <a href="https://sociabuzz.com/dayynime/tribe" target="_blank">☕ Support Me</a>
+    <a href="https://v1.animasu.app" target="_blank">v1.animasu.app</a>
+    <a href="https://v1.samehadaku.how" target="_blank">v1.samehadaku.how</a>
+    <a href="https://otakudesu.best" target="_blank">otakudesu.best</a>
+  </div>
+  <div class="footer-copy">Dayynime API v1.0.0 &nbsp;·&nbsp; Built with <span>Flask</span> + cloudscraper</div>
+</div>
+
 <script>
-function toggle(header){if(event.target.closest('.copy-btn'))return;header.closest('.ep-card').classList.toggle('open')}
-function copyJson(e,btn,id){e.stopPropagation();const text=document.getElementById(id).innerText;navigator.clipboard.writeText(text).then(()=>{btn.textContent='✓ Copied';btn.classList.add('ok');setTimeout(()=>{btn.textContent='Copy';btn.classList.remove('ok')},2000)})}
+function toggle(header){
+  if(event.target.closest('.copy-btn'))return;
+  const card=header.closest('.ep-card');
+  card.classList.toggle('open');
+}
+function copyJson(e,btn,id){
+  e.stopPropagation();
+  const text=document.getElementById(id).innerText;
+  navigator.clipboard.writeText(text).then(()=>{
+    btn.textContent='✓ Copied';btn.classList.add('ok');
+    setTimeout(()=>{btn.textContent='Copy';btn.classList.remove('ok')},2000);
+  });
+}
+// staggered card entrance animation
+document.addEventListener('DOMContentLoaded',()=>{
+  const cards=document.querySelectorAll('.ep-card');
+  cards.forEach((c,i)=>{
+    c.style.opacity='0';c.style.transform='translateY(12px)';
+    setTimeout(()=>{
+      c.style.transition='opacity 0.4s ease,transform 0.4s ease';
+      c.style.opacity='1';c.style.transform='translateY(0)';
+    },i*30+100);
+  });
+});
 </script>
 </body>
 </html>'''
