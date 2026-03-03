@@ -13,6 +13,7 @@ app = Flask(__name__)
 
 BASE_URL  = "https://v1.animasu.app"
 BASE_SHK  = "https://v1.samehadaku.how"   # Samehadaku source
+BASE_OTK  = "https://otakudesu.best"       # Otakudesu source
 CACHE     = {}
 CACHE_TTL = {
     "home": 300, "ongoing": 180, "completed": 600,
@@ -178,6 +179,292 @@ def _get_shk(path_or_url, retries=4):
         except Exception as e:
             print(f"[shk] attempt {i+1} error: {e}")
     return None
+
+def _get_otk(path_or_url, retries=4):
+    """CF bypass multi-strategy khusus otakudesu (Animestream theme)."""
+    url = path_or_url if path_or_url.startswith("http") else BASE_OTK + path_or_url
+    strategies = [
+        {"browser": {"browser": "chrome",  "platform": "windows", "mobile": False}},
+        {"browser": {"browser": "chrome",  "platform": "linux",   "mobile": False}},
+        {"browser": {"browser": "firefox", "platform": "windows", "mobile": False}},
+        {"browser": {"browser": "chrome",  "platform": "android", "mobile": True}},
+    ]
+    headers_base = {
+        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8",
+        "Referer":         BASE_OTK + "/",
+    }
+    for i in range(retries):
+        try:
+            if i > 0: time.sleep(i * 1.5)
+            s = cloudscraper.create_scraper(**strategies[i % len(strategies)])
+            ua = ("Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36"
+                  if i == 3 else
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
+            s.headers.update({**headers_base, "User-Agent": ua})
+            r = s.get(url, timeout=20)
+            if r.status_code == 200:
+                return BeautifulSoup(r.text, "html.parser")
+        except Exception as e:
+            print(f"[otk] attempt {i+1} error: {e}")
+    return None
+
+# ══════════════════════════════════════════════════════
+# OTAKUDESU SCRAPER FUNCTIONS
+# Theme   : Animestream (WordPress 5.6.16)
+# Domain  : otakudesu.best
+# Cards   : .detpost
+# Paginate: /page/{n}/
+# Episodes: .episodelist li
+# Servers : SELECT + base64 decode
+# Search  : /?s={query}
+# Schedule: /jadwal-rilis/ (.venz structure)
+# Genres  : /genre-list/ → /genres/{slug}/
+# ══════════════════════════════════════════════════════
+
+def _otk_get_cards(soup):
+    return soup.select(".detpost")
+
+def _otk_parse_card(card):
+    d = {}
+    for sel in ["h2", "h3", ".title", "a[title]"]:
+        el = card.select_one(sel)
+        if el:
+            text = el.get_text(strip=True) or el.get("title", "")
+            if text and len(text) > 1:
+                d["title"] = text; break
+    a = card.select_one("a[href]")
+    if a:
+        d["url"]     = a["href"]
+        d["animeId"] = a["href"].rstrip("/").split("/")[-1]
+    img = card.select_one("img")
+    if img:
+        for attr in ["src", "data-src", "data-lazy-src", "data-original"]:
+            v = img.get(attr, "")
+            if v and v.startswith("http"):
+                d["poster"] = v; break
+    for sel in [".epz", ".epx", ".ep", ".eggepisode", ".l2"]:
+        el = card.select_one(sel)
+        if el: d["episode"] = el.get_text(strip=True); break
+    for sel in [".typez", ".type", ".etiket"]:
+        el = card.select_one(sel)
+        if el: d["type"] = el.get_text(strip=True); break
+    return d
+
+def _otk_pagination(soup, page=1):
+    p = {"hasNextPage": False, "hasPrevPage": False, "currentPage": page}
+    if soup.select_one(".next.page-numbers, a.next, [rel='next']"):
+        p["hasNextPage"] = True
+    p["hasPrevPage"] = page > 1
+    cur = soup.select_one(".page-numbers.current")
+    if cur:
+        try: p["currentPage"] = int(re.sub(r"\D", "", cur.get_text()))
+        except: pass
+    return p
+
+def _otk_server_type(url):
+    u = url.lower()
+    for k, v in {
+        "desustream": "desustream", "blogger.com": "blogger",
+        "mega.nz": "mega", "vidhide": "vidhide",
+        "doodstream": "doodstream", "streamtape": "streamtape",
+        "ok.ru": "okru", "streamwish": "streamwish",
+        "filelions": "filelions", ".mp4": "mp4", ".m3u8": "m3u8",
+    }.items():
+        if k in u: return v
+    return "embed"
+
+def _otk_decode_server(val):
+    try:
+        padded  = val + "=" * (4 - len(val) % 4)
+        decoded = base64.b64decode(padded).decode("utf-8", errors="ignore")
+        m = re.search(r'src=["\'](https?://[^"\']+)["\']', decoded)
+        if m: return m.group(1)
+        if decoded.strip().startswith("http"): return decoded.strip()
+    except:
+        pass
+    return None
+
+def _otk_do_home():
+    soup = _get_otk("/")
+    if not soup: return None
+    return {"animeList": [_otk_parse_card(c) for c in _otk_get_cards(soup)]}
+
+def _otk_do_list(path, page=1):
+    url = path.rstrip("/") + f"/page/{page}/" if page > 1 else path
+    soup = _get_otk(url)
+    if not soup: return None
+    return {
+        "animeList":  [_otk_parse_card(c) for c in _otk_get_cards(soup)],
+        "pagination": _otk_pagination(soup, page),
+    }
+
+def _otk_do_search(query, page=1):
+    url = f"/page/{page}/?s={query}" if page > 1 else f"/?s={query}"
+    soup = _get_otk(url)
+    if not soup: return None
+    return {
+        "query":      query,
+        "animeList":  [_otk_parse_card(c) for c in _otk_get_cards(soup)],
+        "pagination": _otk_pagination(soup, page),
+    }
+
+def _otk_do_detail(slug):
+    soup = _get_otk(f"/anime/{slug}/")
+    if not soup: return None
+    d = {
+        "animeId": slug, "title": "", "poster": "",
+        "synopsis": "", "genres": [], "info": {}, "episodeList": [],
+    }
+    h1 = soup.select_one("h1")
+    if h1: d["title"] = h1.get_text(strip=True)
+
+    img = soup.select_one(".wp-post-image")
+    if img: d["poster"] = img.get("src") or img.get("data-src", "")
+
+    for sel in [".sinopc p", ".sinopc", ".entry-content p", ".desc p"]:
+        el = soup.select_one(sel)
+        if el and len(el.get_text(strip=True)) > 30:
+            d["synopsis"] = el.get_text(strip=True); break
+
+    for row in soup.select(".infox .spe span, .spe span"):
+        t = row.get_text(" ", strip=True)
+        if ":" in t:
+            k, _, v = t.partition(":")
+            if k.strip() and v.strip():
+                d["info"][k.strip().lower()] = v.strip()
+
+    score_el = soup.select_one(".rating strong, .score, .rtg")
+    if score_el: d["info"]["score"] = score_el.get_text(strip=True)
+
+    seen_g = set()
+    for a in soup.select("a[href*='genre'], a[href*='genres']"):
+        name     = a.get_text(strip=True)
+        href     = a.get("href", "")
+        genre_id = href.rstrip("/").split("/")[-1]
+        if name and genre_id and genre_id not in seen_g \
+                and genre_id not in ("genre-list", "genres", "genre"):
+            seen_g.add(genre_id)
+            d["genres"].append({"name": name, "genreId": genre_id})
+
+    for li in soup.select(".episodelist li"):
+        a = li.find("a", href=True)
+        if not a: continue
+        ep_slug = a["href"].rstrip("/").split("/")[-1]
+        if "episode" not in ep_slug.lower(): continue
+        m = re.search(r"episode[- _](\d+(?:\.\d+)?)", ep_slug, re.I)
+        date_el = li.select_one("span.zeebr, span.date, .released")
+        d["episodeList"].append({
+            "episodeId": ep_slug,
+            "num":       m.group(1) if m else "",
+            "title":     a.get_text(strip=True),
+            "date":      date_el.get_text(strip=True) if date_el else "",
+        })
+    return d
+
+def _otk_do_episode(slug):
+    soup = _get_otk(f"/episode/{slug}/")
+    if not soup: soup = _get_otk(f"/{slug}/")
+    if not soup: return None
+    d = {
+        "episodeId": slug, "title": "", "animeId": "",
+        "episodeNum": "", "prevEpisode": None, "nextEpisode": None,
+        "defaultEmbed": "", "servers": [],
+    }
+    h1 = soup.select_one("h1.entry-title, h1")
+    if h1: d["title"] = h1.get_text(strip=True)
+
+    for a in soup.select("a[href*='/anime/']"):
+        href = a.get("href", "")
+        a_slug = href.rstrip("/").split("/")[-1]
+        if a_slug and a_slug != slug:
+            d["animeId"] = a_slug; break
+
+    m = re.search(r"episode[- _](\d+(?:\.\d+)?)", slug, re.I)
+    if m: d["episodeNum"] = m.group(1)
+
+    for a in soup.select(".nvs a, .naveps a, .nflx a, .nextprev a, .episodegate a"):
+        href  = a.get("href", "")
+        text  = a.get_text(strip=True).lower()
+        ep2   = href.rstrip("/").split("/")[-1]
+        if "episode" not in ep2: continue
+        if any(w in text for w in ["sebelum", "prev", "◄", "←", "«"]):
+            d["prevEpisode"] = ep2
+        elif any(w in text for w in ["selanjut", "next", "►", "→", "»"]):
+            d["nextEpisode"] = ep2
+
+    iframe = soup.select_one("#pembed iframe, .pembed iframe, iframe[src]")
+    if iframe: d["defaultEmbed"] = iframe.get("src", "")
+
+    servers = []
+    for sel_el in soup.select("select"):
+        opts = sel_el.select("option")
+        if any(opt.get("value","").startswith("http") and "/episode/" in opt.get("value","")
+               for opt in opts):
+            continue  # skip select navigasi episode
+        for opt in opts:
+            val = opt.get("value", "").strip()
+            lbl = opt.get_text(strip=True)
+            if not val or lbl.lower() in ("pilih server", "select server", ""): continue
+            decoded = _otk_decode_server(val)
+            if not decoded and val.startswith("http") and BASE_OTK not in val:
+                decoded = val
+            if decoded:
+                if not d["defaultEmbed"]: d["defaultEmbed"] = decoded
+                servers.append({"name": lbl, "embedUrl": decoded, "type": _otk_server_type(decoded)})
+
+    if not servers and d["defaultEmbed"]:
+        servers.append({"name": "Server 1", "embedUrl": d["defaultEmbed"],
+                        "type": _otk_server_type(d["defaultEmbed"])})
+    d["servers"] = servers
+    return d
+
+def _otk_do_genres():
+    soup = _get_otk("/genre-list/")
+    if not soup: return None
+    genres, seen = [], set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"]; name = a.get_text(strip=True)
+        slug = href.rstrip("/").split("/")[-1]
+        if not name or not slug or slug in seen or len(name) > 40: continue
+        if "/genres/" not in href and "/genre/" not in href: continue
+        seen.add(slug)
+        genres.append({"name": name, "genreId": slug, "url": href})
+    return {"genreList": genres}
+
+def _otk_do_schedule():
+    soup = _get_otk("/jadwal-rilis/")
+    if not soup: return None
+    DAYS_ID = {
+        "monday":"Senin","tuesday":"Selasa","wednesday":"Rabu",
+        "thursday":"Kamis","friday":"Jumat","saturday":"Sabtu","sunday":"Minggu",
+        "senin":"Senin","selasa":"Selasa","rabu":"Rabu",
+        "kamis":"Kamis","jumat":"Jumat","sabtu":"Sabtu","minggu":"Minggu",
+    }
+    DAY_ORDER = ["Senin","Selasa","Rabu","Kamis","Jumat","Sabtu","Minggu"]
+    sch = {}
+    for block in soup.select(".venz"):
+        ne = block.select_one("h2, h3, h4, strong, b, .hari")
+        if not ne: continue
+        day_name = DAYS_ID.get(ne.get_text(strip=True).lower().strip())
+        if not day_name: continue
+        items = []
+        for li in block.select("ul li"):
+            a = li.find("a", href=True)
+            if not a: continue
+            title = a.get_text(strip=True); href = a["href"]
+            if not title or not href: continue
+            poster = ""
+            img = li.find("img")
+            if img:
+                for attr in ["src","data-src","data-lazy-src","data-original"]:
+                    v = img.get(attr, "")
+                    if v and v.startswith("http"): poster = v; break
+            items.append({"title": title, "animeId": href.rstrip("/").split("/")[-1],
+                          "url": href, "poster": poster})
+        if items: sch[day_name] = items
+    return {"days": [{"day": d, "animeList": sch[d]} for d in DAY_ORDER if d in sch]}
+
 
 def ok(data):
     return jsonify({"status": "success", "data": data})
@@ -935,6 +1222,224 @@ ENDPOINTS_DOCS = [
             }
         }
     },
+    # ── Otakudesu endpoints ──
+    {
+        "title": "[OTK] Halaman Home",
+        "path": "/otk/anime/home",
+        "description": "Mengambil daftar anime terbaru dari homepage otakudesu.best.",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeList": [
+                    {
+                        "animeId": "goumon-s2-sub-indo",
+                        "title": "Himesama \"Goumon\" no Jikan desu Season 2",
+                        "poster": "https://otakudesu.best/wp-content/uploads/2026/01/153326.jpg",
+                        "url": "https://otakudesu.best/anime/goumon-s2-sub-indo/",
+                        "episode": "Episode 8",
+                        "type": "TV"
+                    }
+                ]
+            }
+        }
+    },
+    {
+        "title": "[OTK] Anime Ongoing",
+        "path": "/otk/anime/ongoing?page=1",
+        "description": "Daftar anime yang sedang tayang di otakudesu.best.",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeList": [
+                    {
+                        "animeId": "goumon-s2-sub-indo",
+                        "title": "Himesama \"Goumon\" no Jikan desu Season 2",
+                        "poster": "https://otakudesu.best/wp-content/uploads/2026/01/153326.jpg",
+                        "episode": "Episode 8",
+                        "type": "TV"
+                    }
+                ],
+                "pagination": {"hasNextPage": True, "hasPrevPage": False, "currentPage": 1}
+            }
+        }
+    },
+    {
+        "title": "[OTK] Anime Completed",
+        "path": "/otk/anime/completed?page=1",
+        "description": "Daftar anime yang sudah selesai tayang di otakudesu.best.",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeList": [
+                    {
+                        "animeId": "shingeki-no-kyojin-sub-indo",
+                        "title": "Shingeki no Kyojin",
+                        "poster": "https://otakudesu.best/wp-content/uploads/...",
+                        "type": "TV"
+                    }
+                ],
+                "pagination": {"hasNextPage": True, "hasPrevPage": False, "currentPage": 1}
+            }
+        }
+    },
+    {
+        "title": "[OTK] Anime Movie",
+        "path": "/otk/anime/movies?page=1",
+        "description": "Daftar anime Movie di otakudesu.best.",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeList": [
+                    {
+                        "animeId": "kimi-no-na-wa-sub-indo",
+                        "title": "Kimi no Na wa.",
+                        "poster": "https://otakudesu.best/wp-content/uploads/...",
+                        "type": "Movie"
+                    }
+                ],
+                "pagination": {"hasNextPage": True, "hasPrevPage": False, "currentPage": 1}
+            }
+        }
+    },
+    {
+        "title": "[OTK] Anime Populer",
+        "path": "/otk/anime/popular?page=1",
+        "description": "Daftar anime terpopuler di otakudesu.best.",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeList": [
+                    {
+                        "animeId": "naruto-sub-indo",
+                        "title": "Naruto",
+                        "poster": "https://otakudesu.best/wp-content/uploads/...",
+                        "type": "TV"
+                    }
+                ],
+                "pagination": {"hasNextPage": True, "hasPrevPage": False, "currentPage": 1}
+            }
+        }
+    },
+    {
+        "title": "[OTK] Cari Anime",
+        "path": "/otk/anime/search?q={query}",
+        "description": "Cari anime berdasarkan judul di otakudesu.best.",
+        "example": "Contoh: /otk/anime/search?q=naruto",
+        "response": {
+            "status": "success",
+            "data": {
+                "query": "naruto",
+                "animeList": [
+                    {
+                        "animeId": "naruto-sub-indo",
+                        "title": "Naruto",
+                        "poster": "https://otakudesu.best/wp-content/uploads/...",
+                        "type": "TV"
+                    }
+                ],
+                "pagination": {"hasNextPage": False, "hasPrevPage": False, "currentPage": 1}
+            }
+        }
+    },
+    {
+        "title": "[OTK] Detail Lengkap Anime",
+        "path": "/otk/anime/detail/{slug}",
+        "description": "Detail lengkap anime beserta daftar episode. Slug dari field `animeId`.",
+        "example": "Contoh: /otk/anime/detail/goumon-s2-sub-indo",
+        "response": {
+            "status": "success",
+            "data": {
+                "animeId": "goumon-s2-sub-indo",
+                "title": "Himesama \"Goumon\" no Jikan desu Season 2 Subtitle Indonesia",
+                "poster": "https://otakudesu.best/wp-content/uploads/2026/01/153326.jpg",
+                "synopsis": "Kelanjutan dari season pertama...",
+                "info": {"status": "Ongoing", "studio": "Asahi Production"},
+                "genres": [
+                    {"name": "Comedy", "genreId": "comedy"},
+                    {"name": "Fantasy", "genreId": "fantasy"}
+                ],
+                "episodeList": [
+                    {"episodeId": "hgnjd-s2-episode-8-sub-indo", "num": "8",
+                     "title": "Himesama Goumon Season 2 Episode 8", "date": ""},
+                    {"episodeId": "hgnjd-s2-episode-7-sub-indo", "num": "7",
+                     "title": "Himesama Goumon Season 2 Episode 7", "date": ""}
+                ]
+            }
+        }
+    },
+    {
+        "title": "[OTK] Detail Episode + Server",
+        "path": "/otk/anime/episode/{slug}",
+        "description": "Detail episode beserta server streaming. Server di-decode dari SELECT base64 (metode Otakudesu).",
+        "example": "Contoh: /otk/anime/episode/hgnjd-s2-episode-8-sub-indo",
+        "response": {
+            "status": "success",
+            "data": {
+                "episodeId": "hgnjd-s2-episode-8-sub-indo",
+                "title": "Himesama Goumon Season 2 Episode 8 Sub Indo",
+                "animeId": "goumon-s2-sub-indo",
+                "episodeNum": "8",
+                "prevEpisode": "hgnjd-s2-episode-7-sub-indo",
+                "nextEpisode": None,
+                "defaultEmbed": "https://desustream.info/dstream/updesu/v5/index.php?id=...",
+                "servers": [
+                    {"name": "Desustream 360p",
+                     "embedUrl": "https://desustream.info/dstream/updesu/v5/index.php?id=...",
+                     "type": "desustream"},
+                    {"name": "Desustream 720p",
+                     "embedUrl": "https://desustream.info/dstream/updesu/v5/index.php?id=...",
+                     "type": "desustream"}
+                ]
+            }
+        }
+    },
+    {
+        "title": "[OTK] Daftar Genre",
+        "path": "/otk/anime/genres",
+        "description": "Semua genre anime di otakudesu.best (36 genre).",
+        "response": {
+            "status": "success",
+            "data": {
+                "genreList": [
+                    {"name": "Action",    "genreId": "action",    "url": "https://otakudesu.best/genres/action/"},
+                    {"name": "Adventure", "genreId": "adventure", "url": "https://otakudesu.best/genres/adventure/"},
+                    {"name": "Comedy",    "genreId": "comedy",    "url": "https://otakudesu.best/genres/comedy/"},
+                    {"name": "Drama",     "genreId": "drama",     "url": "https://otakudesu.best/genres/drama/"},
+                    {"name": "Fantasy",   "genreId": "fantasy",   "url": "https://otakudesu.best/genres/fantasy/"}
+                ]
+            }
+        }
+    },
+    {
+        "title": "[OTK] Jadwal Rilis",
+        "path": "/otk/anime/schedule",
+        "description": "Jadwal rilis anime per hari dari /jadwal-rilis/ otakudesu.best.",
+        "response": {
+            "status": "success",
+            "data": {
+                "days": [
+                    {
+                        "day": "Senin",
+                        "animeList": [
+                            {"title": "Goumon Baito-kun no Nichijou",
+                             "animeId": "goumon-baito-sub-indo",
+                             "url": "https://otakudesu.best/anime/goumon-baito-sub-indo/",
+                             "poster": "https://otakudesu.best/wp-content/uploads/2026/01/153380.jpg"}
+                        ]
+                    },
+                    {
+                        "day": "Minggu",
+                        "animeList": [
+                            {"title": "Ao no Orchestra Season 2",
+                             "animeId": "orchestra-s2-sub-indo",
+                             "url": "https://otakudesu.best/anime/orchestra-s2-sub-indo/",
+                             "poster": "https://otakudesu.best/wp-content/uploads/2025/10/151796.jpg"}
+                        ]
+                    }
+                ]
+            }
+        }
+    },
 ]
 def highlight_json(value):
     text = _json.dumps(value, indent=2, ensure_ascii=False)
@@ -993,6 +1498,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 .ep-card.shk{border-left-color:var(--blue)}
 .ep-card.shk:hover{border-color:rgba(56,189,248,0.4)}
 .ep-card.shk .method-pill{background:rgba(56,189,248,0.1);color:var(--blue);border-color:rgba(56,189,248,0.2)}
+.section-header.otk .section-line{background:linear-gradient(to right,#f59e0b,transparent)}
+.section-header.otk .section-title{color:#f59e0b}
+.ep-card.otk{border-left-color:#f59e0b}
+.ep-card.otk:hover{border-color:rgba(245,158,11,0.4)}
+.ep-card.otk .method-pill{background:rgba(245,158,11,0.1);color:#f59e0b;border-color:rgba(245,158,11,0.2)}
 .section-gap{margin-top:36px}
 .ep-card{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;margin-bottom:14px;overflow:hidden;transition:border-color 0.2s,box-shadow 0.2s}
 .ep-card:hover{border-color:rgba(232,80,26,0.4);box-shadow:0 4px 24px rgba(0,0,0,0.3)}
@@ -1052,6 +1562,7 @@ pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
     <div class="stat"><strong>{{ endpoints|length }}</strong>Endpoints</div>
     <div class="stat"><strong>v1.animasu.app</strong>Animasu</div>
     <div class="stat"><strong>v1.samehadaku.how</strong>Samehadaku</div>
+    <div class="stat"><strong>otakudesu.best</strong>Otakudesu</div>
     <div class="stat"><strong>Flask</strong>Framework</div>
     <div class="stat"><strong>JSON</strong>Format</div>
   </div>
@@ -1141,8 +1652,45 @@ pre::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
     </div>
   </div>
   {% endfor %}
+
+  <!-- Otakudesu Endpoints -->
+  <div class="section-header otk section-gap">
+    <span class="section-icon">🍊</span>
+    <span class="section-title">Otakudesu API Endpoints</span>
+    <div class="section-line"></div>
+  </div>
+  {% for ep in endpoints_otk %}
+  <div class="ep-card otk" id="otk{{loop.index}}">
+    <div class="ep-header" onclick="toggle(this)">
+      <span class="method-pill">GET</span>
+      <span class="ep-title">{{ ep.title }}</span>
+      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="path-box">
+      <span class="path-method">GET</span>
+      {% set parts = ep.path.split('{') %}
+      {% if parts|length > 1 %}
+        <span class="path-static">{{ parts[0] }}</span><span class="path-param">{{'{{'}}{{ parts[1] }}</span>
+      {% else %}
+        <span class="path-static">{{ ep.path }}</span>
+      {% endif %}
+    </div>
+    <div class="ep-body">
+      <p class="ep-desc">{{ ep.description }}</p>
+      {% if ep.example is defined %}<p class="ep-example">📌 <span>{{ ep.example }}</span></p>{% endif %}
+      <div class="json-label-row">
+        <span class="json-label-text">Response JSON</span>
+        <button class="copy-btn" onclick="copyJson(event,this,'otk_pre{{loop.index}}')">Copy</button>
+      </div>
+      <div class="json-wrap">
+        <div class="json-bar"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div></div>
+        <pre id="otk_pre{{loop.index}}">{{ ep.json_html }}</pre>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
 </div>
-<div class="footer">Dayynime API v1.0.0 &nbsp;·&nbsp; Source: <a href="https://v1.animasu.app" target="_blank">v1.animasu.app</a> &nbsp;·&nbsp; Built with Flask + cloudscraper</div>
+<div class="footer">Dayynime API v1.0.0 &nbsp;·&nbsp; Source: <a href="https://v1.animasu.app" target="_blank">v1.animasu.app</a> &nbsp;·&nbsp; <a href="https://v1.samehadaku.how" target="_blank">v1.samehadaku.how</a> &nbsp;·&nbsp; <a href="https://otakudesu.best" target="_blank">otakudesu.best</a> &nbsp;·&nbsp; Built with Flask + cloudscraper</div>
 <script>
 function toggle(header){if(event.target.closest('.copy-btn'))return;header.closest('.ep-card').classList.toggle('open')}
 function copyJson(e,btn,id){e.stopPropagation();const text=document.getElementById(id).innerText;navigator.clipboard.writeText(text).then(()=>{btn.textContent='✓ Copied';btn.classList.add('ok');setTimeout(()=>{btn.textContent='Copy';btn.classList.remove('ok')},2000)})}
@@ -1156,20 +1704,23 @@ function copyJson(e,btn,id){e.stopPropagation();const text=document.getElementBy
 
 @app.route("/")
 def index():
-    animasu_rendered, shk_rendered = [], []
+    animasu_rendered, shk_rendered, otk_rendered = [], [], []
     for ep in ENDPOINTS_DOCS:
         ep2 = dict(ep)
         ep2["json_html"] = Markup(highlight_json(ep["response"]))
         if ep["title"].startswith("[SHK]"):
-            # Hapus prefix [SHK] dari judul untuk tampilan
             ep2["title"] = ep["title"][6:]
             shk_rendered.append(ep2)
+        elif ep["title"].startswith("[OTK]"):
+            ep2["title"] = ep["title"][6:]
+            otk_rendered.append(ep2)
         else:
             animasu_rendered.append(ep2)
     return render_template_string(HTML,
         endpoints_animasu=animasu_rendered,
         endpoints_shk=shk_rendered,
-        endpoints=animasu_rendered + shk_rendered,  # fallback
+        endpoints_otk=otk_rendered,
+        endpoints=animasu_rendered + shk_rendered + otk_rendered,
     )
 
 @app.route("/anime/home")
@@ -1312,6 +1863,67 @@ def shk_schedule():
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "source": BASE_URL})
+
+# ══════════════════════════════════════════════════════
+# OTAKUDESU ROUTES  (/otk/anime/*)
+# ══════════════════════════════════════════════════════
+
+@app.route("/otk/anime/home")
+def otk_home():
+    data = _cached("otk_home", "home", _otk_do_home)
+    return ok(data) if data else err("Gagal mengambil home otakudesu")
+
+@app.route("/otk/anime/ongoing")
+def otk_ongoing():
+    page = request.args.get("page", 1, type=int)
+    data = _cached(f"otk_ongoing_{page}", "ongoing", lambda: _otk_do_list("/ongoing-anime/", page))
+    return ok(data) if data else err("Gagal mengambil ongoing otakudesu")
+
+@app.route("/otk/anime/completed")
+def otk_completed():
+    page = request.args.get("page", 1, type=int)
+    data = _cached(f"otk_completed_{page}", "completed", lambda: _otk_do_list("/complete-anime/", page))
+    return ok(data) if data else err("Gagal mengambil completed otakudesu")
+
+@app.route("/otk/anime/movies")
+def otk_movies():
+    page = request.args.get("page", 1, type=int)
+    data = _cached(f"otk_movies_{page}", "movies", lambda: _otk_do_list("/anime-movie/", page))
+    return ok(data) if data else err("Gagal mengambil movies otakudesu")
+
+@app.route("/otk/anime/popular")
+def otk_popular():
+    page = request.args.get("page", 1, type=int)
+    data = _cached(f"otk_popular_{page}", "popular", lambda: _otk_do_list("/popular-anime/", page))
+    return ok(data) if data else err("Gagal mengambil popular otakudesu")
+
+@app.route("/otk/anime/search")
+def otk_search():
+    q    = request.args.get("q", "").strip()
+    page = request.args.get("page", 1, type=int)
+    if not q: return err("Parameter 'q' diperlukan", 400)
+    data = _otk_do_search(q, page)
+    return ok(data) if data else err("Gagal search otakudesu")
+
+@app.route("/otk/anime/detail/<slug>")
+def otk_detail(slug):
+    data = _cached(f"otk_detail_{slug}", "detail", lambda: _otk_do_detail(slug))
+    return ok(data) if data else err(f"Anime '{slug}' tidak ditemukan", 404)
+
+@app.route("/otk/anime/episode/<path:slug>")
+def otk_episode(slug):
+    data = _cached(f"otk_ep_{slug}", "episode", lambda: _otk_do_episode(slug))
+    return ok(data) if data else err(f"Episode '{slug}' tidak ditemukan", 404)
+
+@app.route("/otk/anime/genres")
+def otk_genres():
+    data = _cached("otk_genres", "genres", _otk_do_genres)
+    return ok(data) if data else err("Gagal mengambil genre otakudesu")
+
+@app.route("/otk/anime/schedule")
+def otk_schedule():
+    data = _cached("otk_schedule", "schedule", _otk_do_schedule)
+    return ok(data) if data else err("Gagal mengambil jadwal otakudesu")
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
