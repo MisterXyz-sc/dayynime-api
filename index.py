@@ -13,7 +13,7 @@ app = Flask(__name__)
 
 BASE_URL  = "https://v1.animasu.app"
 BASE_SHK  = "https://v1.samehadaku.how"   # Samehadaku source
-BASE_OTK  = "https://otakudesu.best"       # Otakudesu source
+BASE_OTK  = "https://otakudesu.blog"       # Otakudesu source
 CACHE     = {}
 CACHE_TTL = {
     "home": 300, "ongoing": 180, "completed": 600,
